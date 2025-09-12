@@ -1,20 +1,20 @@
 # Virtual environments
-   venv/
-   .venv/
-   env/
-   ENV/
+venv/
+.venv/
+env/
+ENV/
    
 # Python cache
-   __pycache__/
-   *.pyc
-   *.pyo
-   *.pyd
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
    
 # IDE files
-   .vscode/
-   .idea/
-   *.swp
-   *.swo
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Data files (if you're storing training data)
 *.csv
