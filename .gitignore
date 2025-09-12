@@ -4,14 +4,25 @@
    env/
    ENV/
    
-   # Python cache
+# Python cache
    __pycache__/
    *.pyc
    *.pyo
    *.pyd
    
-   # IDE files
+# IDE files
    .vscode/
    .idea/
    *.swp
    *.swo
+
+# Data files (if you're storing training data)
+*.csv
+*.json
+data/
+models/
+*.pkl
+*.model
+
+# Environment files
+.env 
