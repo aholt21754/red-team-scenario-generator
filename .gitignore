@@ -27,3 +27,9 @@ models/
 
 # Environment files
 .env 
+
+# Vector database files
+chroma_db/
+
+# Logs
+logs/
