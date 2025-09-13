@@ -1,0 +1,21 @@
+# Core vector database
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
+
+# MITRE ATT&CK data
+mitreattack-python>=3.0.0
+requests>=2.28.0
+
+# Data processing
+pandas>=1.5.0
+numpy>=1.24.0
+
+# LLM integration (choose one)
+#openai>=1.0.0          # For OpenAI GPT models
+anthropic>=0.7.0       # For Claude API
+# google-generativeai   # For Google Gemini
+
+# Utilities
+python-dotenv>=1.0.0
+tqdm>=4.64.0
+colorama>=0.4.6
