@@ -25,67 +25,67 @@ class BaseLLMClient(ABC):
         pass
 
 #TODO: remove OpenAI references - not doing OpenAI 
-class OpenAIClient(BaseLLMClient):
-    """OpenAI API client."""
+#class OpenAIClient(BaseLLMClient):
+#    """OpenAI API client."""
     
-    def __init__(self):
-        """Initialize OpenAI client."""
-        try:
-            import openai
-            self.openai = openai
-            self.client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
-            self.model = config.OPENAI_MODEL
-            logger.info(f"OpenAI client initialized with model: {self.model}")
-        except ImportError:
-            logger.error("OpenAI library not installed. Install with: pip install openai")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
-            raise
+#    def __init__(self):
+#        """Initialize OpenAI client."""
+#        try:
+#            import openai
+#            self.openai = openai
+#            self.client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
+#            self.model = config.OPENAI_MODEL
+#            logger.info(f"OpenAI client initialized with model: {self.model}")
+#        except ImportError:
+#            logger.error("OpenAI library not installed. Install with: pip install openai")
+#            raise
+#        except Exception as e:
+#            logger.error(f"Failed to initialize OpenAI client: {e}")
+#            raise
     
-    def generate(self, prompt: str, max_tokens: int = 2000, 
-                temperature: float = 0.7, **kwargs) -> Optional[str]:
-        """Generate response using OpenAI API.
+#    def generate(self, prompt: str, max_tokens: int = 2000, 
+#                temperature: float = 0.7, **kwargs) -> Optional[str]:
+#        """Generate response using OpenAI API.
         
-        Args:
-            prompt: Input prompt
-            max_tokens: Maximum tokens in response
-            temperature: Creativity/randomness (0.0-1.0)
-            **kwargs: Additional parameters
+#        Args:
+#            prompt: Input prompt
+#            max_tokens: Maximum tokens in response
+#            temperature: Creativity/randomness (0.0-1.0)
+#            **kwargs: Additional parameters
             
-        Returns:
-            Generated response or None if failed
-        """
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                timeout=60
-            )
+#        Returns:
+#            Generated response or None if failed
+#        """
+#        try:
+#            response = self.client.chat.completions.create(
+#                model=self.model,
+#                messages=[{"role": "user", "content": prompt}],
+#                max_tokens=max_tokens,
+#                temperature=temperature,
+#                timeout=60
+#            )
             
-            result = response.choices[0].message.content
-            logger.info(f"OpenAI generation successful ({len(result)} characters)")
-            return result
+#            result = response.choices[0].message.content
+#            logger.info(f"OpenAI generation successful ({len(result)} characters)")
+#            return result
             
-        except Exception as e:
-            logger.error(f"OpenAI generation failed: {e}")
-            return None
+#        except Exception as e:
+#            logger.error(f"OpenAI generation failed: {e}")
+#            return None
     
-    def is_available(self) -> bool:
-        """Check if OpenAI service is available."""
-        try:
+#    def is_available(self) -> bool:
+#        """Check if OpenAI service is available."""
+#        try:
             # Simple test call
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "Test"}],
-                max_tokens=5
-            )
-            return True
-        except Exception as e:
-            logger.warning(f"OpenAI service unavailable: {e}")
-            return False
+#            response = self.client.chat.completions.create(
+#                model=self.model,
+#                messages=[{"role": "user", "content": "Test"}],
+#                max_tokens=5
+#            )
+#            return True
+#        except Exception as e:
+#            logger.warning(f"OpenAI service unavailable: {e}")
+#            return False
 
 class AnthropicClient(BaseLLMClient):
     """Anthropic Claude API client."""
@@ -325,9 +325,9 @@ class LLMClient:
         
         # Initialize client
         try:
-            if selected_provider == "openai":
-                self.client = OpenAIClient()
-            elif selected_provider == "anthropic":
+#            if selected_provider == "openai":
+#                self.client = OpenAIClient()
+            if selected_provider == "anthropic":
                 self.client = AnthropicClient()
             else:
                 self.client = MockLLMClient()
@@ -405,12 +405,12 @@ class LLMClient:
         available = []
         
         # Check OpenAI
-        if config.OPENAI_API_KEY:
-            try:
-                import openai
-                available.append("openai")
-            except ImportError:
-                logger.warning("OpenAI library not available")
+ #       if config.OPENAI_API_KEY:
+ #           try:
+ #               import openai
+ #               available.append("openai")
+ #           except ImportError:
+ #               logger.warning("OpenAI library not available")
         
         # Check Anthropic
         if config.ANTHROPIC_API_KEY:
