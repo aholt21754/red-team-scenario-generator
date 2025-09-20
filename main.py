@@ -8,14 +8,14 @@ from pathlib import Path
 # Add src to path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from src.config import config
-from src.database.vector_db import VectorDB
-from src.data_sources.mitre_attack import MitreAttackLoader
-from src.data_sources.capec_data import CapecDataLoader
-from src.generation.scenario_generator import ScenarioGenerator, ScenarioRequest
-from src.generation.llm_client import LLMClient
-from src.evaluation.evaluator import ScenarioEvaluator
-from src.utils.logging_config import setup_logging, get_logger
+from config import config
+from database.vector_db import VectorDB
+from data_sources.mitre_attack import MitreAttackLoader
+from data_sources.capec_data import CapecDataLoader
+from generation.scenario_generator import ScenarioGenerator, ScenarioRequest
+from generation.llm_client import LLMClient
+from evaluation.evaluator import ScenarioEvaluator
+from utils.logging_config import setup_logging, get_logger
 
 # Setup logging
 setup_logging()

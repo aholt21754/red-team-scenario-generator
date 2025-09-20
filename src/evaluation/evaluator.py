@@ -43,7 +43,7 @@ class ScenarioEvaluator:
         """
         # Import here to avoid circular imports
         if llm_client is None:
-            from src.generation.llm_client import LLMClient
+            from generation.llm_client import LLMClient
             self.llm_client = LLMClient()
         else:
             self.llm_client = llm_client
@@ -69,7 +69,7 @@ class ScenarioEvaluator:
         
         try:
             # Import prompt builder here to avoid circular imports
-            from src.generation.prompt_builder import PromptBuilder
+            from generation.prompt_builder import PromptBuilder
             prompt_builder = PromptBuilder()
             
             # Build evaluation prompt

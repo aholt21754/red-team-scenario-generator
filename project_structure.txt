@@ -1,0 +1,20 @@
+project_structure.txt
+├── src/
+│   ├── data_sources/
+│   |   ├── base_loader.py
+|   |   ├── capec_data.py
+|   |   ├── mitre_attack.py
+│   └── database/
+│   |   └── vector_db.py
+│   └── evaluation/
+│   |   └── evaluator.py
+│   └── generation/
+│   |   └── llm_client.py
+│   |   └── prompt_builder.py
+│   |   └── scenario_generator.py
+│   └── utils/
+│   |   └── logging_config.py
+│   ├── config.py
+└── main.py
+├── README.md
+└── requirements.txt
