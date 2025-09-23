@@ -25,8 +25,11 @@ COLLECTION_NAME=redteam_scenarios
 ```
 
 ### Setup and test the Vector DB
+
 Run test_vector_db.py
+
 Expected output:
+```
 🚀 Vector Database Test Suite
 ============================================================
 
@@ -40,10 +43,14 @@ Expected output:
 
 🔍 Testing Database Queries...         ← Tests search functionality
 📊 Found results for test queries      ← Validates everything works
+```
 
 ### Test LLM Configuration
+
 Run test_llm_client.py
+
 Expected output:
+```
 Testing LLM Client...
 ==================================================
 2025-09-19 20:42:59,751 - generation.llm_client - INFO - Available LLM providers: ['anthropic', 'mock']
@@ -69,10 +76,10 @@ The red team will conduct a spear-phishing attack against corporate employees by
 ------------------------------
 
 ✅ LLM Client test passed!
+```
 
 ### Test LLM With Vector DB
-Run test_scenario_generation.py
-This will run the scenario generation end to end and test
+Run test_scenario_generation.py - This will run the scenario generation end to end and test
 
 ### Test Evaluator
 Run test_evaluator.py
