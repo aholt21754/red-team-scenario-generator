@@ -1,4 +1,7 @@
 project_structure.txt
+├── interactive/
+|   └── chatbot.py
+|   └── streamlit_app.py
 ├── scripts/
 |   └── fix_imports.py
 |   └── setup_database.py

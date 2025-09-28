@@ -18,6 +18,7 @@ try:
     from database.vector_db import VectorDB
     from data_sources.mitre_attack import MitreAttackLoader
     from data_sources.capec_data import CapecDataLoader
+    from data_sources.cwe_data import CweDataLoader
     from utils.logging_config import setup_logging, get_logger
 except ImportError as e:
     print(f"Import error: {e}")
@@ -30,7 +31,7 @@ except ImportError as e:
     print("      database/")
     print("      ...")
     sys.exit(1)
-    
+
 # Setup logging
 setup_logging()
 logger = get_logger(__name__)
@@ -108,13 +109,6 @@ def test_dynamic_capec_integration(vector_db):
         print(f"   Attack methods: {patterns_with_methods}/{len(capec_data)}")
         print(f"   Mitigation strategies: {patterns_with_mitigations}/{len(capec_data)}")
         
-        # Show improvement over old system
-        if len(capec_data) > 50:
-            print(f"\n🎉 Massive Improvement:")
-            print(f"   Old system: ~10 hard-coded patterns")
-            print(f"   New system: {len(capec_data)} official CAPEC patterns")
-            print(f"   Improvement: {len(capec_data)/10:.0f}x more data!")
-        
         # Validate data
         if capec_loader.validate_data(capec_data):
             print("✅ Dynamic CAPEC data validation passed")
@@ -139,6 +133,50 @@ def test_dynamic_capec_integration(vector_db):
         print(f"❌ Dynamic CAPEC integration failed: {e}")
         return False
 
+def test_cwe_integration(vector_db):
+    """Test the new CWE (Common Weakness Enumeration) data loading."""
+    print("\n🛡️ Testing CWE Data Integration...")
+    print("-" * 60)
+    
+    try:
+        # Initialize CWE loader
+        cwe_loader = CweDataLoader(cache_enabled=True, cache_duration_hours=1)
+        print("✅ CWE loader initialized")
+        
+        # Load data
+        print("⏳ Loading CWE data... (this may take 60-90 seconds for XML parsing)")
+        cwe_data = cwe_loader.load_data()
+        
+        if not cwe_data:
+            print("❌ No CWE data loaded")
+            return False
+        
+        print(f"✅ Loaded {len(cwe_data)} CWE weaknesses")
+        
+        # Validate data
+        if cwe_loader.validate_data(cwe_data):
+            print("✅ CWE data validation passed")
+        else:
+            print("❌ CWE data validation failed")
+            return False
+        
+        # Transform for vector database
+        documents, metadatas, ids = cwe_loader.transform_for_vector_db(cwe_data)
+        print(f"✅ Transformed data: {len(documents)} documents")
+        
+        # Add to database
+        print("⏳ Adding CWE data to vector database...")
+        if vector_db.add_documents(documents, metadatas, ids):
+            print(f"✅ Successfully added {len(documents)} CWE documents to database")
+            return True
+        else:
+            print("❌ Failed to add CWE data to database")
+            return False
+            
+    except Exception as e:
+        print(f"❌ CWE integration failed: {e}")
+        return False
+    
 def test_mitre_data_loading(vector_db):
     """Test MITRE ATT&CK data loading (existing functionality)."""
     print("\n🎯 Testing MITRE ATT&CK Data Loading...")
@@ -201,11 +239,18 @@ def test_enhanced_database_queries(vector_db):
         "cross-site scripting vulnerabilities",
         "buffer overflow exploitation techniques",
         "social engineering attack methods",
+
+        # CWE-specific queries 
+        "path traversal weakness",
+        "race condition vulnerability",
+        "integer overflow weakness",
         
         # Combined queries
         "web application security testing",
         "network reconnaissance and scanning",
-        "malware analysis and detection evasion"
+        "malware analysis and detection evasion",
+        "privilege escalation vulnerabilities and exploits",
+        "advanced persistent threat simulation techniques"
     ]
     
     successful_queries = 0
@@ -274,19 +319,6 @@ def test_enhanced_database_stats(vector_db):
                     percentage = (count / total_docs) * 100
                     print(f"   {doc_type}: {count} documents ({percentage:.1f}%)")
                 
-                # Verify we have both MITRE and CAPEC data
-                has_mitre = any('mitre' in doc_type.lower() for doc_type in stats['type_distribution'])
-                has_capec = any('capec' in doc_type.lower() for doc_type in stats['type_distribution'])
-                
-                if has_mitre and has_capec:
-                    print("✅ Both MITRE and CAPEC data types present")
-                elif has_mitre:
-                    print("⚠️  Only MITRE data detected")
-                elif has_capec:
-                    print("⚠️  Only CAPEC data detected")
-                else:
-                    print("❌ No recognized data types")
-        
         # Enhanced health check
         print("\n🏥 Enhanced Database Health Check:")
         health = vector_db.health_check()
@@ -380,7 +412,7 @@ def main():
     """Main enhanced test function."""
     print("🚀 Enhanced Vector Database Test Suite")
     print("=" * 70)
-    print("Testing vector database with Dynamic CAPEC integration...")
+    print("Testing vector database with ATT&CK, CAPEC, and CWE integration...")
     print()
     
     # Test 1: Enhanced database setup
@@ -389,24 +421,30 @@ def main():
         print("❌ Enhanced database setup failed - stopping tests")
         return False
     
-    # Test 2: Dynamic CAPEC integration (NEW!)
+    # Test 2: CWE integration
+    cwe_success = test_cwe_integration(vector_db)
+    if not cwe_success:
+        print("❌ CWE integration failed")
+        return False
+    
+    # Test 3: Dynamic CAPEC integration 
     capec_success = test_dynamic_capec_integration(vector_db)
     if not capec_success:
         print("❌ Dynamic CAPEC integration failed")
         return False
     
-    # Test 3: MITRE data loading (existing)
+    # Test 4: ATT&CK data loading
     mitre_success = test_mitre_data_loading(vector_db)
     if not mitre_success:
-        print("❌ MITRE data loading failed")
+        print("❌ ATT&CK data loading failed")
         return False
     
-    # Test 4: Enhanced query testing
+    # Test 5: Enhanced query testing
     query_success = test_enhanced_database_queries(vector_db)
     if not query_success:
         print("⚠️  Enhanced query testing had issues, but continuing...")
     
-    # Test 5: Enhanced database statistics
+    # Test 6: Enhanced database statistics
     test_enhanced_database_stats(vector_db)
     
     # Interactive testing

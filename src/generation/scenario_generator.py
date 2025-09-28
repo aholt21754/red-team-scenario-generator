@@ -3,7 +3,7 @@
 
 import re
 from typing import Dict, List, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from database.vector_db import VectorDB
 from generation.prompt_builder import PromptBuilder
@@ -31,6 +31,7 @@ class ScenarioRequest:
         if self.constraints is None:
             self.constraints = []
 
+
 @dataclass
 class GeneratedScenario:
     """Data class for generated scenarios."""
@@ -45,6 +46,20 @@ class GeneratedScenario:
     resources_required: List[str]
     evaluation_scores: Optional[Dict[str, float]] = None
     raw_response: str = ""
+    target_weakness: List[str] = field(default_factory=list)
+    attack_patterns: List[str] = field(default_factory=list)
+    exploitation_methods: List[str] = field(default_factory=list)
+    mitigation_strategies: List[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.target_weakness is None:
+            self.target_weakness = []
+        if self.attack_patterns is None:
+            self.attack_patterns = []
+        if self.exploitation_methods is None:
+            self.exploitation_methods = []
+        if self.mitigation_strategies is None:
+            self.mitigation_strategies = []
 
 class ScenarioGenerator:
     """Main class for generating red team scenarios."""
@@ -272,6 +287,7 @@ class ScenarioGenerator:
         detection_points = self._extract_detection_points_from_response(response)
         success_metrics = self._extract_success_metrics_from_response(response)
         timeline = self._extract_enhanced_timeline_from_response(response)
+        vulnerability_info = self._extract_vulnerability_info_from_response(response)
         
         scenario = GeneratedScenario(
             title=title,
@@ -283,16 +299,20 @@ class ScenarioGenerator:
             detection_points=detection_points,
             success_metrics=success_metrics,
             resources_required=self._extract_resources_from_response(response),
-            raw_response=response
+            raw_response=response,
+            target_weakness=vulnerability_info.get('target_weaknesses', []),
+            attack_patterns=vulnerability_info.get('attack_patterns', []),
+            exploitation_methods=vulnerability_info.get('exploitation_methods', []),
+            mitigation_strategies=vulnerability_info.get('mitigation_strategies', [])
         )
         
         return scenario
 
     def _extract_techniques_from_response(self, response: str) -> List[str]:
-        """Extract both MITRE techniques and CAPEC patterns from response."""
+        """Extract both ATT&CK techniques, CAPEC patterns, and CWE weaknesses from response."""
         techniques = []
         
-        # Look for MITRE technique patterns (T####)
+        # Look for ATT&CK technique patterns (T####)
         mitre_pattern = re.compile(r'T\d{4}(?:\.\d{3})?')
         mitre_matches = mitre_pattern.findall(response)
         techniques.extend(mitre_matches)
@@ -301,6 +321,11 @@ class ScenarioGenerator:
         capec_pattern = re.compile(r'CAPEC-\d+')
         capec_matches = capec_pattern.findall(response)
         techniques.extend(capec_matches)
+
+        # Look for CWE weakness references (CWE-###)
+        cwe_pattern = re.compile(r'CWE-\d+')
+        cwe_matches = cwe_pattern.findall(response)
+        techniques.extend(cwe_matches)        
         
         # Remove duplicates while preserving order
         seen = set()
@@ -310,7 +335,49 @@ class ScenarioGenerator:
                 seen.add(technique)
                 unique_techniques.append(technique)
         
-        return unique_techniques[:10]  # Limit to reasonable number
+        return unique_techniques[:15]  # Limit to reasonable number
+
+    def _extract_vulnerability_info_from_response(self, response: str) -> Dict[str, List[str]]:
+        """Extract vulnerability and weakness information from response."""
+        vulnerability_info = {
+            'target_weaknesses': [],
+            'attack_patterns': [],
+            'exploitation_methods': [],
+            'mitigation_strategies': []
+        }
+        
+        # Extract target weaknesses section
+        weakness_section = re.search(r'Target Weakness.*?:\s*([^\n]+)', response, re.IGNORECASE)
+        if weakness_section:
+            weakness_text = weakness_section.group(1)
+            # Extract CWE references
+            cwe_matches = re.findall(r'CWE-\d+[^,\n]*', weakness_text)
+            vulnerability_info['target_weaknesses'] = cwe_matches
+        
+        # Extract attack patterns section
+        pattern_section = re.search(r'Attack Patterns.*?:\s*([^\n]+)', response, re.IGNORECASE)
+        if pattern_section:
+            pattern_text = pattern_section.group(1)
+            # Extract CAPEC references
+            capec_matches = re.findall(r'CAPEC-\d+[^,\n]*', pattern_text)
+            vulnerability_info['attack_patterns'] = capec_matches
+        
+        # Extract exploitation methods
+        exploitation_section = re.search(r'Exploitation.*?:(.*?)(?=##|$)', response, re.IGNORECASE | re.DOTALL)
+        if exploitation_section:
+            exploitation_text = exploitation_section.group(1)
+            # Extract bullet points or numbered items
+            methods = re.findall(r'[-*]\s*([^\n]+)', exploitation_text)
+            vulnerability_info['exploitation_methods'] = methods[:5]  # Limit to 5
+        
+        # Extract mitigation strategies
+        mitigation_section = re.search(r'(?:Mitigation|Remediation).*?:(.*?)(?=##|$)', response, re.IGNORECASE | re.DOTALL)
+        if mitigation_section:
+            mitigation_text = mitigation_section.group(1)
+            strategies = re.findall(r'[-*]\s*([^\n]+)', mitigation_text)
+            vulnerability_info['mitigation_strategies'] = strategies[:5]  # Limit to 5
+        
+        return vulnerability_info
 
     def _extract_enhanced_timeline_from_response(self, response: str) -> List[Dict[str, str]]:
         """Extract timeline with CAPEC execution flow awareness."""
