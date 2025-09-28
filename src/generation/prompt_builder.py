@@ -131,90 +131,129 @@ Provide only the JSON response with no additional text.
         return evaluation_prompt
     
     def _extract_techniques(self, query_results: Dict) -> List[Dict]:
-        """Extract and process techniques from query results.
-        
-        Args:
-            query_results: Vector database query results
-            
-        Returns:
-            List of processed technique information
-        """
+        """Enhanced technique extraction supporting both MITRE and CAPEC data."""
         techniques = []
-        
+    
         if not query_results or not query_results.get('metadatas'):
             return techniques
-        
+    
         for i, metadata in enumerate(query_results['metadatas']):
-            # Calculate relevance score (convert distance to relevance)
             relevance_score = 1 - query_results['distances'][i] if i < len(query_results['distances']) else 0.5
-            
-            technique = {
-                'id': metadata.get('technique_id', 'Unknown'),
-                'name': metadata.get('name', 'Unknown Technique'),
-                'tactics': metadata.get('tactics', []),
-                'platforms': metadata.get('platforms', []),
-                'description': metadata.get('description', '')[:300],  # Truncate for prompt
-                'relevance_score': relevance_score,
-                'type': metadata.get('type', 'unknown')
-            }
-            
-            # Only include techniques with reasonable relevance
-            if relevance_score > 0.3:
-                techniques.append(technique)
         
+            # Handle MITRE techniques
+            if metadata.get('type') == 'mitre_technique':
+                technique = {
+                    'id': metadata.get('technique_id', 'Unknown'),
+                    'name': metadata.get('name', 'Unknown Technique'),
+                    'tactics': metadata.get('tactics', '').split(', ') if metadata.get('tactics') else [],
+                    'platforms': metadata.get('platforms', '').split(', ') if metadata.get('platforms') else [],
+                    'description': metadata.get('description', '')[:300],  # Truncate to reduce prompt size - does it need to be a little bigger?
+                    'relevance_score': relevance_score,
+                    'type': 'mitre_technique',
+                    'source': 'MITRE ATT&CK'
+            }
+        
+            # Handle CAPEC patterns - NEW ENHANCED SUPPORT
+            elif metadata.get('type') == 'capec_pattern':
+                technique = {
+                    'id': f"CAPEC-{metadata.get('capec_id', 'Unknown')}",
+                    'name': metadata.get('name', 'Unknown Pattern'),
+                    'tactics': [],  # CAPEC doesn't use MITRE tactics directly
+                    'platforms': [],
+                    'description': metadata.get('description', '')[:300], # Truncate to reduce prompt size - does it need to be a little bigger?
+                    'relevance_score': relevance_score,
+                    'type': 'capec_pattern',
+                    'source': 'CAPEC',
+                    # Enhanced CAPEC-specific fields
+                    'attack_complexity': metadata.get('attack_complexity', 'Unknown'),
+                    'skill_level': metadata.get('skill_level', 'Unknown'),
+                    'environment_suitability': metadata.get('environment_suitability', '').split(', ') if metadata.get('environment_suitability') else [],
+                    'likelihood': metadata.get('likelihood', 'Unknown'),
+                    'severity': metadata.get('severity', 'Unknown'),
+                    'prerequisite_count': metadata.get('prerequisite_count', 0),
+                    'mitigation_count': metadata.get('mitigation_count', 0),
+                    'related_techniques': metadata.get('related_techniques', '').split(', ') if metadata.get('related_techniques') else []
+                }
+        
+        # Only include techniques with reasonable relevance
+        if relevance_score > 0.5:
+            techniques.append(technique)
+    
         # Sort by relevance score (highest first)
         techniques.sort(key=lambda x: x['relevance_score'], reverse=True)
-        
-        return techniques[:5]  # Limit to top 5 most relevant
+    
+        return techniques[:8]  # Increased limit to top 8 techniques
 
     #TODO: prompt hasn't been determined - there's a placeholder here but it's not final   
     def _build_main_prompt(self, request, techniques: List[Dict]) -> str:
-        """Build the main scenario generation prompt.
-        
-        Args:
-            request: ScenarioRequest object
-            techniques: List of relevant techniques
-            
-        Returns:
-            Main prompt string
-        """
+        """Enhanced main prompt building with CAPEC integration."""
         prompt = f"""
-Generate a detailed, realistic red team attack scenario based on the following requirements:
+    Generate a detailed, realistic red team attack scenario based on the following requirements:
 
+    **Scenario Request:** {request.query}
+    **Target Environment:** {request.environment}
+    **Skill Level:** {request.skill_level}
+    **Target Duration:** {request.target_duration}
+
+    """
+
+        if techniques:
+            # Separate MITRE and CAPEC techniques
+            mitre_techniques = [t for t in techniques if t['type'] == 'mitre_technique']
+            capec_patterns = [t for t in techniques if t['type'] == 'capec_pattern']
+            
+            if mitre_techniques:
+                prompt += f"""
+**Relevant MITRE ATT&CK Techniques:**
+"""
+                for i, tech in enumerate(mitre_techniques, 1):
+                    prompt += f"""
+{i}. **{tech['name']} ({tech['id']})** [Relevance: {tech['relevance_score']:.2f}]
+- Tactics: {', '.join(tech['tactics']) if tech['tactics'] else 'Multiple'}
+- Platforms: {', '.join(tech['platforms']) if tech['platforms'] else 'Cross-platform'}
+- Description: {tech['description']}
 """
 
- # TODO: Perhaps if time allows - add these back in - but for now leaving out to simplify prompt       
- #       if request.objectives:
- #           prompt += f"\n- Additional Objectives: {', '.join(request.objectives)}"
-        
- #       if request.constraints:
- #           prompt += f"\n- Constraints: {', '.join(request.constraints)}"
-        
-        if techniques:
+            if capec_patterns:
+                prompt += f"""
+
+    **Relevant CAPEC Attack Patterns:**
+    """
+                for i, pattern in enumerate(capec_patterns, 1):
+                    prompt += f"""
+    {i}. **{pattern['name']} ({pattern['id']})** [Relevance: {pattern['relevance_score']:.2f}]
+    - Attack Complexity: {pattern['attack_complexity']}
+    - Required Skill Level: {pattern['skill_level']}
+    - Suitable Environments: {', '.join(pattern['environment_suitability']) if pattern['environment_suitability'] else 'General'}
+    - Likelihood: {pattern['likelihood']} | Severity: {pattern['severity']}
+    - Prerequisites: {pattern['prerequisite_count']} items
+    - Available Mitigations: {pattern['mitigation_count']} strategies
+    - Related ATT&CK Techniques: {', '.join(pattern['related_techniques']) if pattern['related_techniques'] else 'None mapped'}
+    - Description: {pattern['description']}
+    """
+
             prompt += f"""
 
-**Relevant MITRE ATT&CK Techniques (prioritized by relevance):**
-"""
-            for i, tech in enumerate(techniques, 1):
-                prompt += f"""
-{i}. **{tech['name']} ({tech['id']})** [Relevance: {tech['relevance_score']:.2f}]
-   - Tactics: {', '.join(tech['tactics']) if tech['tactics'] else 'Multiple'}
-   - Platforms: {', '.join(tech['platforms']) if tech['platforms'] else 'Cross-platform'}
-   - Description: {tech['description']}
-"""
-        
-        prompt += f"""
+    **Enhanced Scenario Context:**
 
-**Scenario Context:**
+    **Requirements:**
+    1. **Leverage both MITRE ATT&CK techniques AND CAPEC attack patterns** for comprehensive coverage
+    2. **Match complexity to skill level**: Use CAPEC complexity ratings to ensure appropriate difficulty
+    3. **Environment alignment**: Utilize CAPEC environment suitability data for realistic targeting
+    4. **Realistic prerequisites**: Incorporate actual CAPEC prerequisite analysis
+    5. **Balanced likelihood**: Consider CAPEC likelihood ratings for scenario realism
+    6. **Comprehensive mitigations**: Include both preventive and detective controls
+    7. **Attack pattern progression**: Show natural flow from CAPEC patterns to MITRE techniques
+    8. **Skill-appropriate execution**: Align technical depth with specified skill level
 
-**Requirements:**
-1. Use realistic attack techniques that align with the provided MITRE ATT&CK techniques
-2. Include specific tools, commands, and procedures where appropriate
-3. Provide clear success criteria and detection opportunities
-4. Ensure the scenario is ethical and suitable for authorized testing
-5. Make it engaging and educational for the red team participants
-"""
-        
+    **Scenario Generation Guidelines:**
+    - For **Beginner** scenarios: Focus on CAPEC patterns with "Low" complexity and clear prerequisites
+    - For **Intermediate** scenarios: Combine multiple CAPEC patterns with moderate complexity
+    - For **Expert** scenarios: Chain complex CAPEC patterns with advanced MITRE techniques
+    - **Always** include realistic detection opportunities based on pattern characteristics
+    - **Always** provide practical mitigation strategies drawn from CAPEC mitigation data
+    """
+    
         return prompt
 
   #TODO: example needs to be finalized this is a placeholder  
@@ -241,61 +280,108 @@ Success Metrics: Successful credential harvesting, lateral movement to target sy
         
         return examples
 
-  #TODO: output format needs to be finalized - this is a placeholder  
     def _add_output_format(self) -> str:
-        """Add output format instructions.
-        
-        Returns:
-            Output format string
-        """
+        """Enhanced output format instructions leveraging CAPEC structure."""
         format_instructions = """
 
-**Required Output Format:**
+    **Required Output Format (Enhanced with CAPEC Integration):**
 
-# [Scenario Title]
+    # [Scenario Title]
 
-## Objective
-[Clear, concise mission statement]
+    ## Objective
+    [Clear, concise mission statement aligned with CAPEC attack pattern goals]
 
-## Prerequisites
-- [Required tools and access]
-- [Necessary skills and knowledge]
-- [Environmental requirements]
+    ## Prerequisites (CAPEC-Informed)
+    - [Technical requirements based on CAPEC prerequisite analysis]
+    - [Environmental conditions needed for attack success]
+    - [Skill and knowledge requirements matching specified level]
+    - [Tools and access requirements]
 
-## Attack Timeline
-### Phase 1: [Phase Name] (Duration)
-- [Specific actions and techniques]
-- [Expected outcomes]
+    ## Attack Pattern Foundation
+    **Primary CAPEC Pattern(s):** [List main CAPEC patterns being demonstrated]
+    **Supporting MITRE Techniques:** [List relevant ATT&CK techniques]
+    **Attack Complexity:** [Based on CAPEC complexity assessment]
+    **Likelihood/Severity:** [Based on CAPEC likelihood and severity ratings]
 
-### Phase 2: [Phase Name] (Duration)
-- [Specific actions and techniques]
-- [Expected outcomes]
+    ## Execution Timeline (CAPEC Execution Flow Based)
+    ### Phase 1: Reconnaissance & Resource Development (Duration)
+    - **CAPEC Preparation Steps:**
+    - [Specific reconnaissance activities based on CAPEC prerequisites]
+    - [Tool and payload preparation requirements]
+    - **Expected Outcomes:** [What should be achieved in this phase]
 
-[Continue for all phases...]
+    ### Phase 2: Initial Access & Exploitation (Duration)
+    - **CAPEC Attack Execution:**
+    - [Step-by-step implementation of CAPEC pattern]
+    - [Integration with MITRE techniques where applicable]
+    - **Technical Implementation:** [Specific commands, tools, or techniques]
+    - **Expected Outcomes:** [Indicators of successful execution]
 
-## Techniques Used
-- [MITRE Technique ID]: [Brief description]
-- [Additional techniques as relevant]
+    ### Phase 3: Post-Exploitation & Impact Demonstration (Duration)
+    - **Follow-on Activities:**
+    - [Actions after successful initial exploitation]
+    - [Demonstration of business impact]
+    - **Evidence Collection:** [What to document for scenario completion]
 
-## Detection Opportunities
-- [Where defenders might detect this activity]
-- [Specific indicators to monitor]
+    ### Phase 4: Detection Testing & Cleanup (Duration)
+    - **Detection Validation:**
+    - [Test detection capabilities based on CAPEC mitigation strategies]
+    - [Verify monitoring and alerting effectiveness]
+    - **Cleanup Activities:** [Remove artifacts and restore systems]
 
-## Success Metrics
-- [Objective completion criteria]
-- [Measurable outcomes]
+    ## Technical Implementation Details
+    **Attack Vectors:** [Specific methods from CAPEC pattern analysis]
+    **Tools Required:** [Based on CAPEC execution requirements and skill level]
+    **Target Systems:** [Aligned with CAPEC environment suitability]
+    **Payload/Exploit Details:** [Technical specifics appropriate to skill level]
 
-## Resources Required
-- [Tools and software needed]
-- [Personnel requirements]
-- [Access requirements]
+    ## Detection Opportunities (CAPEC Mitigation-Informed)
+    **Preventive Controls:**
+    - [Controls that would prevent this CAPEC pattern]
+    - [Input validation, access controls, etc.]
 
-## Cleanup and Documentation
-- [Steps to remove artifacts]
-- [Documentation requirements]
+    **Detective Controls:**
+    - [Monitoring and alerting for CAPEC pattern indicators]
+    - [Log analysis and behavioral detection]
 
-Ensure the scenario is detailed enough to execute but flexible enough to adapt to specific environments.
-"""
+    **Response Actions:**
+    - [Incident response procedures for this attack pattern]
+    - [Containment and eradication steps]
+
+    ## Success Metrics & Validation
+    **Primary Objectives:**
+    - [Core goals based on CAPEC pattern completion]
+    - [Technical milestones for attack success]
+
+    **Learning Objectives:**
+    - [Skills and knowledge gained from this scenario]
+    - [Understanding of attack pattern effectiveness]
+
+    **Detection Effectiveness:**
+    - [Validation of defensive capabilities]
+    - [Gaps identified in monitoring and response]
+
+    ## Resources Required
+    **Personnel:** [Team roles and skill requirements]
+    **Technical Resources:** [Systems, tools, and access needed]
+    **Time Investment:** [Realistic time allocation per phase]
+    **Environment Setup:** [Infrastructure and configuration requirements]
+
+    ## Follow-up Recommendations
+    **Immediate Actions:** [Priority remediation based on CAPEC mitigations]
+    **Long-term Improvements:** [Strategic security enhancements]
+    **Additional Testing:** [Related attack patterns to explore]
+
+    ---
+
+    **Scenario Characteristics:**
+    - Complexity Level: [Based on CAPEC complexity rating]
+    - Skill Level Required: [Aligned with CAPEC skill requirements]
+    - Environment Applicability: [Based on CAPEC environment suitability]
+    - Real-world Likelihood: [Based on CAPEC likelihood assessment]
+
+    Ensure the scenario provides a realistic, educational experience that demonstrates both offensive techniques and defensive considerations while maintaining appropriate complexity for the specified skill level.
+    """
         
         return format_instructions
     

@@ -87,6 +87,8 @@ def main():
     # Title and header
     st.title("🛡️ Red Team Scenario Generator")
     st.markdown("*AI-powered tool for generating and refining cybersecurity red team scenarios*")
+    st.info("🚀 **Enhanced with Official Data Sources:** 500+ MITRE ATT&CK techniques and 600+ CAPEC attack patterns from official MITRE databases")
+    
     
     # Initialize components
     components = initialize_components()
@@ -98,30 +100,77 @@ def main():
         st.header("⚙️ Settings")
         
         # Environment settings
-        environment = st.selectbox(
-            "Target Environment",
-            ["Corporate", "Cloud", "Healthcare", "Financial", "Government", "Educational"],
-            index=0
+        environment = st.sidebar.selectbox(
+            "🌍 Target Environment",
+            options=["Corporate", "Web Applications", "Cloud", "Mobile", "Network", "Generic"],
+            index=0,  # Default to Corporate
+            help="Filters scenarios based on CAPEC environment suitability data"
         )
-        
-        skill_level = st.selectbox(
-            "Skill Level",
-            ["Beginner", "Intermediate", "Advanced", "Expert"],
-            index=1
+
+        skill_level = st.sidebar.selectbox(
+            "🎯 Skill Level",
+            options=["Beginner", "Intermediate", "Expert"],
+            index=1,  # Default to Intermediate
+            help="Matches scenarios to CAPEC complexity levels"
         )
-        
-        duration = st.selectbox(
-            "Target Duration",
-            ["1-2 hours", "2-4 hours", "4-6 hours", "Full day", "Multi-day"],
-            index=1
+
+        duration = st.sidebar.selectbox(
+            "⏱️ Target Duration",
+            options=["1-2 hours", "2-4 hours", "4-6 hours", "6-8 hours"],
+            index=1,  # Default to 2-4 hours
+            help="Expected exercise duration"
         )
-        
-        team_size = st.slider("Team Size", 1, 10, 3)
-        
+
+        team_size = st.sidebar.slider(
+            "👥 Team Size",
+            min_value=1,
+            max_value=8,
+            value=3,
+            help="Number of red team members"
+        )
+
         # System info
-        st.header("📊 System Status")
-        st.success(f"✅ Knowledge Base: {components['stats']['total_documents']} techniques")
-        st.success(f"✅ AI Provider: {components['llm_provider']}")
+        st.header("📊 Knowledge Base Status")
+        # Get detailed type distribution
+        type_distribution = components['stats'].get('type_distribution', {})
+
+        # Analyze data types with flexible detection
+        mitre_count = 0
+        capec_count = 0
+
+        for doc_type, count in type_distribution.items():
+            if 'mitre' in doc_type.lower():
+                mitre_count += count
+            elif 'capec' in doc_type.lower():
+                capec_count += count
+
+        # Display the enhanced status
+        total_docs = components['stats']['total_documents']
+        st.success(f"✅ **Total Knowledge Base:** {total_docs:,} techniques")
+
+        # Create columns for the breakdown
+        col_mitre, col_capec = st.columns(2)
+
+        with col_mitre:
+            st.metric(
+                label="🎯 MITRE ATT&CK",
+                value=f"{mitre_count:,}",
+                help="Tactical techniques and procedures"
+            )
+
+        with col_capec:
+            st.metric(
+                label="⚡ CAPEC Patterns", 
+                value=f"{capec_count:,}",
+                help="Attack patterns and methods"
+            )
+
+        st.success(f"✅ **AI Provider:** {components['llm_provider']}")
+
+        # Show enhancement status
+        if mitre_count > 0 and capec_count > 0:
+            st.success("🚀 **Enhanced Integration:** Both MITRE and CAPEC data sources active!")
+
         
         # Quick examples
         st.header("💡 Example Requests")
@@ -231,7 +280,36 @@ def main():
                 st.write(scenario.objective)
                 
                 st.subheader("📝 Description")
-                st.write(scenario.description)
+                description = scenario.description
+
+                # Handle long descriptions gracefully
+                if len(description) > 1500:
+                    # Very long - use expander
+                    with st.expander("📖 View Full Description (Click to Expand)"):
+                        st.markdown(description)
+                    
+                    # Show summary
+                    lines = description.split('\n')
+                    summary_lines = []
+                    for line in lines[:10]:  # First 10 lines
+                        if line.strip():
+                            summary_lines.append(line)
+                    
+                    st.write("**Summary (first 10 lines):**")
+                    st.write('\n'.join(summary_lines) + "\n\n*[Click above to see full description]*")
+
+                elif len(description) > 800:
+                    # Medium length - show with scroll
+                    st.text_area(
+                        "Full Description:", 
+                        value=description,
+                        height=300,
+                        disabled=True  # Read-only
+                    )
+                else:
+                    # Short description - show normally
+                    st.write(description)
+
                 
                 if hasattr(scenario, 'evaluation_scores') and scenario.evaluation_scores:
                     st.subheader("📊 Quality Score")
@@ -265,10 +343,35 @@ def main():
                 col_tech1, col_tech2 = st.columns(2)
                 
                 with col_tech1:
-                    st.subheader("🔧 Techniques Used")
+                    st.subheader("🔧 Enhanced Technique Analysis")
                     if scenario.techniques_used:
-                        for technique in scenario.techniques_used:
-                            st.write(f"• {technique}")
+                        # Separate MITRE and CAPEC techniques
+                        mitre_techs = [t for t in scenario.techniques_used if t.startswith('T') and len(t) >= 5]
+                        capec_patterns = [t for t in scenario.techniques_used if 'CAPEC' in t or t.startswith('CAPEC')]
+                        other_techs = [t for t in scenario.techniques_used if t not in mitre_techs and t not in capec_patterns]
+                        
+                        # Display metrics
+                        col_a, col_b, col_c = st.columns(3)
+                        col_a.metric("🎯 MITRE", len(mitre_techs))
+                        col_b.metric("⚡ CAPEC", len(capec_patterns))
+                        col_c.metric("📊 Total", len(scenario.techniques_used))
+                        
+                        # Show techniques by category
+                        if mitre_techs:
+                            st.write("**🎯 MITRE ATT&CK Techniques:**")
+                            for tech in mitre_techs:
+                                st.write(f"• `{tech}`")
+                        
+                        if capec_patterns:
+                            st.write("**⚡ CAPEC Attack Patterns:**")
+                            for pattern in capec_patterns:
+                                st.write(f"• `{pattern}`")
+                        
+                        if other_techs:
+                            st.write("**🔧 Other Techniques:**")
+                            for tech in other_techs:
+                                st.write(f"• {tech}")
+                        
                     else:
                         st.info("No techniques specified")
                 

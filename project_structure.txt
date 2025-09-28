@@ -1,4 +1,12 @@
 project_structure.txt
+├── scripts/
+|   └── fix_imports.py
+|   └── setup_database.py
+|   └── test_dynamic_capec.py
+|   └── test_evaluator.py
+|   └── test_llm_client.py
+|   └── test_scenario_generation.py
+|   └── test_vector_db.py
 ├── src/
 │   ├── data_sources/
 │   |   ├── base_loader.py

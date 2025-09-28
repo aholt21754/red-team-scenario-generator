@@ -1,6 +1,7 @@
 # src/generation/scenario_generator.py
 """Main scenario generation orchestration."""
 
+import re
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
@@ -138,96 +139,376 @@ class ScenarioGenerator:
         return scenarios
     
     def _query_relevant_techniques(self, request: ScenarioRequest) -> Optional[Dict]:
-        """Query vector database for techniques relevant to the request.
-        
-        Args:
-            request: Scenario generation request
-            
-        Returns:
-            Query results from vector database
-        """
+        """Enhanced query strategy leveraging CAPEC metadata filtering."""
         try:
-            # Build search query from request
+            # Build base search query
             search_query = self._build_search_query(request)
             
-            # Query vector database
-            results = self.vector_db.query(
+            # First, get a broader set of results
+            initial_results = self.vector_db.query(
                 query_text=search_query,
-                n_results=config.DEFAULT_N_RESULTS
+                n_results=config.DEFAULT_N_RESULTS * 2  # Get more results for filtering
             )
             
-            if results:
-                logger.info(f"Found {len(results['documents'])} relevant techniques")
+            if not initial_results:
+                return None
             
-            return results
+            # Apply CAPEC-aware filtering
+            filtered_results = self._apply_capec_filtering(initial_results, request)
+            
+            # If we have good filtered results, use them; otherwise fall back to initial
+            final_results = filtered_results if filtered_results['documents'] else initial_results
+            
+            # Limit to requested number
+            if len(final_results['documents']) > config.DEFAULT_N_RESULTS:
+                for key in final_results:
+                    final_results[key] = final_results[key][:config.DEFAULT_N_RESULTS]
+            
+            logger.info(f"Enhanced query returned {len(final_results['documents'])} results")
+            return final_results
             
         except Exception as e:
-            logger.error(f"Failed to query techniques: {e}")
+            logger.error(f"Enhanced query failed: {e}")
             return None
-    
-    def _build_search_query(self, request: ScenarioRequest) -> str:
-        """Build search query from scenario request.
+
+    def _apply_capec_filtering(self, results: Dict, request: ScenarioRequest) -> Dict:
+        """Apply CAPEC-aware filtering based on request parameters."""
+        if not results or not results.get('metadatas'):
+            return results
         
-        Args:
-            request: Scenario generation request
+        filtered_docs = []
+        filtered_metas = []
+        filtered_distances = []
+        filtered_ids = []
+        
+        for i, metadata in enumerate(results['metadatas']):
+            include_item = True
             
-        Returns:
-            Search query string
-        """
+            # Filter by environment if it's a CAPEC pattern
+            if metadata.get('type') == 'capec_pattern' and request.environment != "Generic":
+                environments = metadata.get('environment_suitability', '').split(', ')
+                if environments and request.environment not in environments:
+                    # Only exclude if environment is explicitly incompatible
+                    if 'General' not in environments and len(environments) > 0:
+                        include_item = False
+            
+            # Filter by skill level if it's a CAPEC pattern
+            if metadata.get('type') == 'capec_pattern' and include_item:
+                pattern_skill = metadata.get('skill_level', '').lower()
+                request_skill = request.skill_level.lower()
+                
+                # Skill level mapping
+                skill_levels = {'beginner': 1, 'intermediate': 2, 'expert': 3}
+                
+                pattern_level = skill_levels.get(pattern_skill, 2)
+                request_level = skill_levels.get(request_skill, 2)
+                
+                # Allow patterns at or below requested skill level
+                if pattern_level > request_level + 1:  # Allow some flexibility
+                    include_item = False
+            
+            # Filter by complexity for duration matching
+            if metadata.get('type') == 'capec_pattern' and include_item:
+                complexity = metadata.get('attack_complexity', '').lower()
+                duration = request.target_duration.lower()
+                
+                # Simple heuristic: complex patterns need more time
+                if 'high' in complexity and ('1' in duration or '30 min' in duration):
+                    include_item = False
+                elif 'low' in complexity and ('6' in duration or '8' in duration):
+                    # Low complexity patterns might not fill long sessions well
+                    pass  # Keep them but they'll rank lower
+            
+            if include_item:
+                filtered_docs.append(results['documents'][i])
+                filtered_metas.append(metadata)
+                filtered_distances.append(results['distances'][i])
+                filtered_ids.append(results['ids'][i])
+        
+        return {
+            'documents': filtered_docs,
+            'metadatas': filtered_metas,
+            'distances': filtered_distances,
+            'ids': filtered_ids
+        }
+
+    def _build_search_query(self, request: ScenarioRequest) -> str:
+        """Enhanced search query building with CAPEC considerations."""
         query_parts = [request.query]
         
         # Add environment context
         if request.environment and request.environment != "Generic":
             query_parts.append(f"{request.environment} environment")
         
+        # Add skill level context for CAPEC matching
+        if request.skill_level:
+            skill_terms = {
+                'Beginner': ['basic', 'simple', 'low complexity'],
+                'Intermediate': ['standard', 'moderate'],
+                'Expert': ['advanced', 'complex', 'sophisticated']
+            }
+            if request.skill_level in skill_terms:
+                query_parts.extend(skill_terms[request.skill_level])
+        
         # Add objectives if specified
         if request.objectives:
             query_parts.extend(request.objectives)
         
         return " ".join(query_parts)
-    
-    def _parse_scenario_response(self, response: str, 
-                               request: ScenarioRequest) -> GeneratedScenario:
-        """Parse LLM response into structured scenario.
-        
-        Args:
-            response: Raw LLM response
-            request: Original request
-            
-        Returns:
-            Structured scenario object
-        """
-        # Simple parsing - in production, you might use more sophisticated parsing
+
+    def _parse_scenario_response(self, response: str, request: ScenarioRequest) -> GeneratedScenario:
+        """Enhanced parsing with CAPEC structure awareness."""
         lines = response.split('\n')
         
-        # Extract title (first non-empty line or fallback)
+        # Extract title
         title = "Generated Red Team Scenario"
         for line in lines:
             if line.strip() and not line.startswith('#'):
                 title = line.strip()
                 break
         
-        # For now, create a basic scenario structure
-        # In production, you'd implement proper parsing of the LLM response
+        # Enhanced parsing for CAPEC-informed content
+        techniques_used = self._extract_techniques_from_response(response)
+        detection_points = self._extract_detection_points_from_response(response)
+        success_metrics = self._extract_success_metrics_from_response(response)
+        timeline = self._extract_enhanced_timeline_from_response(response)
+        
         scenario = GeneratedScenario(
             title=title,
-            description=response[:500] + "..." if len(response) > 500 else response,
+            description=response,
             objective=f"Execute {request.query} in {request.environment} environment",
-            prerequisites=["Network access", "Basic tools", "Target reconnaissance"],
-            timeline=[
-                {"phase": "Reconnaissance", "duration": "30 minutes", "description": "Gather target information"},
-                {"phase": "Initial Access", "duration": "1 hour", "description": "Establish foothold"},
-                {"phase": "Execution", "duration": "2 hours", "description": "Execute main objectives"},
-                {"phase": "Cleanup", "duration": "30 minutes", "description": "Remove traces"}
-            ],
-            techniques_used=["T1566.001", "T1190", "T1078"],  # These would be extracted from query results
-            detection_points=["Email security alerts", "Network monitoring", "Login anomalies"],
-            success_metrics=["Initial access achieved", "Objectives completed", "No detection"],
-            resources_required=["Red team tools", "Test accounts", "Monitoring access"],
+            prerequisites=self._extract_prerequisites_from_response(response),
+            timeline=timeline,
+            techniques_used=techniques_used,
+            detection_points=detection_points,
+            success_metrics=success_metrics,
+            resources_required=self._extract_resources_from_response(response),
             raw_response=response
         )
         
         return scenario
+
+    def _extract_techniques_from_response(self, response: str) -> List[str]:
+        """Extract both MITRE techniques and CAPEC patterns from response."""
+        techniques = []
+        
+        # Look for MITRE technique patterns (T####)
+        mitre_pattern = re.compile(r'T\d{4}(?:\.\d{3})?')
+        mitre_matches = mitre_pattern.findall(response)
+        techniques.extend(mitre_matches)
+        
+        # Look for CAPEC pattern references (CAPEC-###)
+        capec_pattern = re.compile(r'CAPEC-\d+')
+        capec_matches = capec_pattern.findall(response)
+        techniques.extend(capec_matches)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_techniques = []
+        for technique in techniques:
+            if technique not in seen:
+                seen.add(technique)
+                unique_techniques.append(technique)
+        
+        return unique_techniques[:10]  # Limit to reasonable number
+
+    def _extract_enhanced_timeline_from_response(self, response: str) -> List[Dict[str, str]]:
+        """Extract timeline with CAPEC execution flow awareness."""
+        timeline = []
+        
+        # Look for phase patterns that align with CAPEC execution flows
+        phase_patterns = [
+            r'Phase \d+:?\s*([^(]+)\s*\(([^)]+)\)',
+            r'Step \d+:?\s*([^(]+)\s*\(([^)]+)\)',
+            r'### ([^(]+)\s*\(([^)]+)\)',
+            r'## ([^(]+)\s*\(([^)]+)\)'
+        ]
+        
+        for pattern in phase_patterns:
+            matches = re.findall(pattern, response, re.IGNORECASE)
+            for match in matches:
+                phase_name = match[0].strip()
+                duration = match[1].strip()
+                
+                # Extract description for this phase
+                phase_description = f"Execute {phase_name.lower()}"
+                
+                timeline.append({
+                    "phase": phase_name,
+                    "duration": duration,
+                    "description": phase_description
+                })
+        
+        # Fallback to default CAPEC-inspired timeline if none found
+        if not timeline:
+            timeline = [
+                {"phase": "Reconnaissance", "duration": "30 minutes", "description": "Gather target information and identify attack vectors"},
+                {"phase": "Resource Development", "duration": "45 minutes", "description": "Prepare tools and payloads for attack execution"},
+                {"phase": "Initial Access", "duration": "1 hour", "description": "Establish initial foothold using identified vulnerabilities"},
+                {"phase": "Execution", "duration": "90 minutes", "description": "Execute main attack objectives and techniques"},
+                {"phase": "Impact & Cleanup", "duration": "30 minutes", "description": "Demonstrate impact and remove attack artifacts"}
+            ]
+        
+        return timeline
+
+    def _extract_detection_points_from_response(self, response: str) -> List[str]:
+        """Extract detection opportunities with CAPEC mitigation awareness."""
+        detection_points = []
+        
+        # Common detection patterns enhanced with CAPEC insights
+        detection_keywords = [
+            'monitoring', 'alerts', 'logs', 'detection', 'indicators',
+            'anomalies', 'signatures', 'behavioral', 'network traffic',
+            'file integrity', 'process monitoring', 'authentication logs'
+        ]
+        
+        # Look for bullet points or numbered lists mentioning detection
+        lines = response.split('\n')
+        for line in lines:
+            if any(keyword in line.lower() for keyword in detection_keywords):
+                if any(marker in line for marker in ['•', '-', '*', '1.', '2.', '3.']):
+                    clean_line = re.sub(r'^[\s\-\*\•\d\.]+', '', line).strip()
+                    if clean_line and len(clean_line) > 10:
+                        detection_points.append(clean_line)
+        
+        # Ensure we have some detection points
+        if not detection_points:
+            detection_points = [
+                "Network traffic anomalies and unusual connection patterns",
+                "Authentication system alerts for suspicious login attempts", 
+                "Process monitoring for unexpected application behavior",
+                "File system monitoring for unauthorized access attempts"
+            ]
+        
+        return detection_points[:6]  # Reasonable limit
+
+    def _extract_prerequisites_from_response(self, response: str) -> List[str]:
+        """Extract prerequisites with CAPEC prerequisite awareness."""
+        prerequisites = []
+        
+        # Look for prerequisite sections
+        prereq_section_match = re.search(r'(?:prerequisites?|requirements?):?\s*\n((?:[-\*\•]\s*.+\n?)+)', response, re.IGNORECASE)
+        
+        if prereq_section_match:
+            prereq_text = prereq_section_match.group(1)
+            prereq_lines = prereq_text.split('\n')
+            for line in prereq_lines:
+                clean_line = re.sub(r'^[\s\-\*\•]+', '', line).strip()
+                if clean_line and len(clean_line) > 5:
+                    prerequisites.append(clean_line)
+        
+        # Fallback prerequisites
+        if not prerequisites:
+            prerequisites = [
+                "Target system or application access",
+                "Basic reconnaissance tools and techniques",
+                "Understanding of target environment architecture",
+                "Appropriate authorization for testing activities"
+            ]
+        
+        return prerequisites[:5]
+
+    def _extract_success_metrics_from_response(self, response: str) -> List[str]:
+        """Extract success metrics from response."""
+        success_metrics = []
+        
+        # Look for success/metrics sections
+        lines = response.split('\n')
+        in_metrics_section = False
+        
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Check if we're entering a metrics section
+            if any(keyword in line_lower for keyword in ['success', 'metrics', 'criteria', 'objectives']):
+                in_metrics_section = True
+                continue
+            
+            # Check if we're leaving the section
+            if in_metrics_section and line.startswith('#'):
+                in_metrics_section = False
+                continue
+            
+            # Extract metrics from bullet points
+            if in_metrics_section and any(marker in line for marker in ['•', '-', '*', '1.', '2.', '3.']):
+                clean_line = re.sub(r'^[\s\-\*\•\d\.]+', '', line).strip()
+                if clean_line and len(clean_line) > 10:
+                    success_metrics.append(clean_line)
+        
+        # Fallback metrics if none found
+        if not success_metrics:
+            success_metrics = [
+                "Successful completion of attack objectives",
+                "Demonstration of vulnerabilities without causing damage",
+                "Documentation of attack path and techniques used",
+                "Validation of detection and response capabilities"
+            ]
+        
+        return success_metrics[:5]  # Limit to reasonable number
+
+    def _extract_resources_from_response(self, response: str) -> List[str]:
+        """Extract required resources from response."""
+        resources = []
+        
+        # Look for resources/requirements sections
+        lines = response.split('\n')
+        in_resources_section = False
+        
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Check if we're entering a resources section
+            if any(keyword in line_lower for keyword in ['resources', 'requirements', 'tools', 'equipment']):
+                in_resources_section = True
+                continue
+            
+            # Check if we're leaving the section
+            if in_resources_section and line.startswith('#'):
+                in_resources_section = False
+                continue
+            
+            # Extract resources from bullet points
+            if in_resources_section and any(marker in line for marker in ['•', '-', '*', '1.', '2.', '3.']):
+                clean_line = re.sub(r'^[\s\-\*\•\d\.]+', '', line).strip()
+                if clean_line and len(clean_line) > 5:
+                    resources.append(clean_line)
+        
+        # Fallback resources if none found
+        if not resources:
+            resources = [
+                "Red team testing toolkit",
+                "Target environment access",
+                "Testing authorization documentation",
+                "Monitoring and logging access"
+            ]
+        
+        return resources[:6]  # Limit to reasonable number
+
+    def _extract_prerequisites_from_response(self, response: str) -> List[str]:
+        """Extract prerequisites with CAPEC prerequisite awareness."""
+        prerequisites = []
+        
+        # Look for prerequisite sections
+        prereq_section_match = re.search(r'(?:prerequisites?|requirements?):?\s*\n((?:[-\*\•]\s*.+\n?)+)', response, re.IGNORECASE)
+        
+        if prereq_section_match:
+            prereq_text = prereq_section_match.group(1)
+            prereq_lines = prereq_text.split('\n')
+            for line in prereq_lines:
+                clean_line = re.sub(r'^[\s\-\*\•]+', '', line).strip()
+                if clean_line and len(clean_line) > 5:
+                    prerequisites.append(clean_line)
+        
+        # Fallback prerequisites
+        if not prerequisites:
+            prerequisites = [
+                "Target system or application access",
+                "Basic reconnaissance tools and techniques",
+                "Understanding of target environment architecture",
+                "Appropriate authorization for testing activities"
+            ]
+        
+        return prerequisites[:5]
     
     def _create_fallback_scenario(self, request: ScenarioRequest) -> GeneratedScenario:
         """Create a basic fallback scenario when generation fails.
