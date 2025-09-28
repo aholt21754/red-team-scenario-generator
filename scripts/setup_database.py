@@ -16,6 +16,7 @@ try:
     from database.vector_db import VectorDB
     from data_sources.mitre_attack import MitreAttackLoader
     from data_sources.capec_data import CapecDataLoader
+    from data_sources.cwe_data import CweDataLoader
     from utils.logging_config import setup_logging
 except ImportError as e:
     print(f"Import error: {e}")
@@ -169,16 +170,16 @@ def main():
             documents, metadatas, ids = mitre_loader.transform_for_vector_db(mitre_data)
             
             if vector_db.add_documents(documents, metadatas, ids):
-                print(f"✅ Loaded {len(documents)} MITRE techniques")
+                print(f"✅ Loaded {len(documents)} ATT&CK techniques")
             else:
-                print("❌ Failed to add MITRE data to database")
+                print("❌ Failed to add ATT&CK data to database")
                 return False
         else:
-            print("❌ MITRE data validation failed")
+            print("❌ ATT&CK data validation failed")
             return False
             
     except Exception as e:
-        print(f"❌ MITRE data loading failed: {e}")
+        print(f"❌ ATT&CK data loading failed: {e}")
         return False
     
     # Load Enhanced CAPEC data
@@ -192,11 +193,6 @@ def main():
             
             if vector_db.add_documents(documents, metadatas, ids):
                 print(f"✅ Loaded {len(documents)} CAPEC attack patterns")
-                
-                # Show improvement over old system
-                if len(documents) > 50:
-                    print(f"🎉 Massive improvement: {len(documents)} patterns vs ~10 hard-coded!")
-                
             else:
                 print("❌ Failed to add CAPEC data to database")
                 return False
@@ -207,6 +203,34 @@ def main():
     except Exception as e:
         print(f"❌ CAPEC data loading failed: {e}")
         return False
+    
+    # Load CWE data
+    print("\n🛡️ Loading CWE data...")
+
+    try:
+        # Initialize loader
+        cwe_loader = CweDataLoader(cache_enabled=True, cache_duration_hours=24)
+        
+        # Load and validate data
+        cwe_data = cwe_loader.load_data()
+        if cwe_loader.validate_data(cwe_data):
+        
+            # Transform for vector database
+            documents, metadatas, ids = cwe_loader.transform_for_vector_db(cwe_data)
+        
+            # Add to database
+            if vector_db.add_documents(documents, metadatas, ids):
+                logger.info(f"✅ Loaded {len(documents)} CWE weaknesses")
+            else:
+                print("❌ Failed to add CWE data to database")
+                return False
+        else:
+                print("❌ CWE data validation failed")
+                return False
+        
+    except Exception as e:
+        logger.error(f"CWE data loading failed: {e}")
+        return False   
     
     # Final validation
     print("\n🔍 Validating enhanced setup...")

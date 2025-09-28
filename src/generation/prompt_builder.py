@@ -32,10 +32,6 @@ class PromptBuilder:
             # Build main prompt
             prompt = self._build_main_prompt(request, techniques)
             
-            # Add examples if configured
-            if self.include_examples:
-                prompt += self._add_examples()
-            
             # Add output format instructions
             prompt += self._add_output_format()
             
@@ -131,7 +127,7 @@ Provide only the JSON response with no additional text.
         return evaluation_prompt
     
     def _extract_techniques(self, query_results: Dict) -> List[Dict]:
-        """Enhanced technique extraction supporting both MITRE and CAPEC data."""
+        """Enhanced technique extraction supporting both ATT&CK, CAPEC, and CWE data."""
         techniques = []
     
         if not query_results or not query_results.get('metadatas'):
@@ -140,7 +136,7 @@ Provide only the JSON response with no additional text.
         for i, metadata in enumerate(query_results['metadatas']):
             relevance_score = 1 - query_results['distances'][i] if i < len(query_results['distances']) else 0.5
         
-            # Handle MITRE techniques
+            # Handle ATT&CK techniques
             if metadata.get('type') == 'mitre_technique':
                 technique = {
                     'id': metadata.get('technique_id', 'Unknown'),
@@ -153,7 +149,7 @@ Provide only the JSON response with no additional text.
                     'source': 'MITRE ATT&CK'
             }
         
-            # Handle CAPEC patterns - NEW ENHANCED SUPPORT
+            # Handle CAPEC patterns 
             elif metadata.get('type') == 'capec_pattern':
                 technique = {
                     'id': f"CAPEC-{metadata.get('capec_id', 'Unknown')}",
@@ -174,6 +170,26 @@ Provide only the JSON response with no additional text.
                     'mitigation_count': metadata.get('mitigation_count', 0),
                     'related_techniques': metadata.get('related_techniques', '').split(', ') if metadata.get('related_techniques') else []
                 }
+
+            # Handle CWE weaknesses (NEW)
+            elif metadata.get('type') == 'cwe_weakness':
+                technique = {
+                    'id': f"CWE-{metadata.get('cwe_id', 'Unknown')}",
+                    'name': metadata.get('name', 'Unknown Weakness'),
+                    'tactics': [],
+                    'platforms': metadata.get('platforms', '').split(', ') if metadata.get('platforms') else [],
+                    'description': metadata.get('description', '')[:300],
+                    'relevance_score': relevance_score,
+                    'type': 'cwe_weakness',
+                    'source': 'CWE',
+                    'abstraction': metadata.get('abstraction', 'Unknown'),
+                    'impact_severity': metadata.get('impact_severity', 'Unknown'),
+                    'exploitation_complexity': metadata.get('exploitation_complexity', 'Unknown'),
+                    'applicable_environments': metadata.get('applicable_environments', '').split(', ') if metadata.get('applicable_environments') else [],
+                    'capec_mappings': metadata.get('capec_mappings', '').split(', ') if metadata.get('capec_mappings') else [],
+                    'mitigation_count': len(metadata.get('mitigations', [])) if metadata.get('mitigations') else 0,
+                    'detection_methods': len(metadata.get('detection_methods', [])) if metadata.get('detection_methods') else 0
+                }
         
         # Only include techniques with reasonable relevance
         if relevance_score > 0.5:
@@ -182,11 +198,11 @@ Provide only the JSON response with no additional text.
         # Sort by relevance score (highest first)
         techniques.sort(key=lambda x: x['relevance_score'], reverse=True)
     
-        return techniques[:8]  # Increased limit to top 8 techniques
+        return techniques[:10]  
 
     #TODO: prompt hasn't been determined - there's a placeholder here but it's not final   
     def _build_main_prompt(self, request, techniques: List[Dict]) -> str:
-        """Enhanced main prompt building with CAPEC integration."""
+        """Enhanced main prompt building with ATT&CK, CAPEC, and CWE integration."""
         prompt = f"""
     Generate a detailed, realistic red team attack scenario based on the following requirements:
 
@@ -201,6 +217,7 @@ Provide only the JSON response with no additional text.
             # Separate MITRE and CAPEC techniques
             mitre_techniques = [t for t in techniques if t['type'] == 'mitre_technique']
             capec_patterns = [t for t in techniques if t['type'] == 'capec_pattern']
+            cwe_weaknesses = [t for t in techniques if t['type'] == 'cwe_weakness']
             
             if mitre_techniques:
                 prompt += f"""
@@ -232,134 +249,161 @@ Provide only the JSON response with no additional text.
     - Description: {pattern['description']}
     """
 
+            if cwe_weaknesses:
+             prompt += f"""
+
+**Relevant CWE Weaknesses (Common Weakness Enumeration):**
+"""
+            for i, weakness in enumerate(cwe_weaknesses, 1):
+                prompt += f"""
+{i}. **{weakness['name']} ({weakness['id']})** [Relevance: {weakness['relevance_score']:.2f}]
+- Abstraction Level: {weakness['abstraction']}
+- Impact Severity: {weakness['impact_severity']}
+- Exploitation Complexity: {weakness['exploitation_complexity']}
+- Applicable Environments: {', '.join(weakness['applicable_environments']) if weakness['applicable_environments'] else 'General'}
+- Related CAPEC Patterns: {', '.join(weakness['capec_mappings']) if weakness['capec_mappings'] else 'None mapped'}
+- Available Mitigations: {weakness['mitigation_count']} strategies
+- Detection Methods: {weakness['detection_methods']} approaches
+- Description: {weakness['description']}
+"""               
+
             prompt += f"""
 
     **Enhanced Scenario Context:**
 
     **Requirements:**
-    1. **Leverage both MITRE ATT&CK techniques AND CAPEC attack patterns** for comprehensive coverage
-    2. **Match complexity to skill level**: Use CAPEC complexity ratings to ensure appropriate difficulty
-    3. **Environment alignment**: Utilize CAPEC environment suitability data for realistic targeting
-    4. **Realistic prerequisites**: Incorporate actual CAPEC prerequisite analysis
-    5. **Balanced likelihood**: Consider CAPEC likelihood ratings for scenario realism
-    6. **Comprehensive mitigations**: Include both preventive and detective controls
-    7. **Attack pattern progression**: Show natural flow from CAPEC patterns to MITRE techniques
-    8. **Skill-appropriate execution**: Align technical depth with specified skill level
-
+    1. **Leverage both MITRE ATT&CK techniques, CAPEC attack patterns, and CWE weaknesses** for comprehensive coverage
+    2. **Map weakness exploitation to attack patterns**: Use CWE weaknesses as foundation for CAPEC pattern selection
+    3. **Vulnerability-driven approach**: When CWE weaknesses are identified, prioritize scenarios that exploit those specific weaknesses
+    4. **Complexity alignment**: Ensure CWE exploitation complexity matches CAPEC complexity and skill level requirements
+    5. **Environment consistency**: Align CWE applicable environments with CAPEC environment suitability and requested target environment
+    6. **Defense integration**: Combine CWE mitigation strategies with CAPEC defenses and ATT&CK detection opportunities.  Include both preventive and detective controls.
+    7. **Realistic prerequisites**: Incorporate actual CAPEC prerequisite analysis
+    8. **Balanced likelihood**: Consider CAPEC likelihood ratings for scenario realism
+    9. **Attack pattern progression**: Show natural flow from CAPEC patterns to MITRE ATT&CK techniques
+    
+    
     **Scenario Generation Guidelines:**
     - For **Beginner** scenarios: Focus on CAPEC patterns with "Low" complexity and clear prerequisites
     - For **Intermediate** scenarios: Combine multiple CAPEC patterns with moderate complexity
     - For **Expert** scenarios: Chain complex CAPEC patterns with advanced MITRE techniques
+    - **Realistic Vulnerability Chains**: Show progression from weakness discovery → pattern exploitation → technical implementation
+    - **Weakness-First Approach**: When CWE data is available, start scenario design with the identified weakness as the foundation
     - **Always** include realistic detection opportunities based on pattern characteristics
     - **Always** provide practical mitigation strategies drawn from CAPEC mitigation data
+    - **Layered Defense**: Include prevention (CWE mitigations), detection (ATT&CK monitoring), and response strategies
+    
     """
     
         return prompt
 
-  #TODO: example needs to be finalized this is a placeholder  
-    def _add_examples(self) -> str:
-        """Add example scenarios for context.
-        
-        Returns:
-            Example scenarios string
-        """
-        examples = """
-
-**Example Scenario Structure:**
-Title: "Corporate Email Compromise Campaign"
-Objective: Demonstrate lateral movement following initial email compromise
-Prerequisites: External email access, basic social engineering tools
-Timeline:
-- Phase 1 (30 min): Reconnaissance and target identification
-- Phase 2 (1 hour): Spear-phishing campaign execution
-- Phase 3 (90 min): Initial access and credential harvesting
-- Phase 4 (60 min): Lateral movement and objective completion
-Detection Points: Email security alerts, unusual login patterns, network traffic anomalies
-Success Metrics: Successful credential harvesting, lateral movement to target systems
-"""
-        
-        return examples
 
     def _add_output_format(self) -> str:
-        """Enhanced output format instructions leveraging CAPEC structure."""
+        """Enhanced output format instructions leveraging ATT&CK, CAPEC, and CWE structure."""
         format_instructions = """
 
-    **Required Output Format (Enhanced with CAPEC Integration):**
+    **Required Output Format (Enhanced with ATT&CK, CAPEC, and CWE Integration):**
 
     # [Scenario Title]
 
     ## Objective
     [Clear, concise mission statement aligned with CAPEC attack pattern goals]
 
-    ## Prerequisites (CAPEC-Informed)
+    ## Prerequisites 
     - [Technical requirements based on CAPEC prerequisite analysis]
     - [Environmental conditions needed for attack success]
     - [Skill and knowledge requirements matching specified level]
     - [Tools and access requirements]
+    - [Vulnerability prerequisites based on CWE exploitation requirements]
 
-    ## Attack Pattern Foundation
-    **Primary CAPEC Pattern(s):** [List main CAPEC patterns being demonstrated]
-    **Supporting MITRE Techniques:** [List relevant ATT&CK techniques]
-    **Attack Complexity:** [Based on CAPEC complexity assessment]
-    **Likelihood/Severity:** [Based on CAPEC likelihood and severity ratings]
+    ## Attack Foundation
+    **Target Vulnerabilities (CWE):** [List primary CWE weaknesses being exploited]
+    **Attack Patterns (CAPEC):** [List main CAPEC patterns being demonstrated]
+    **Implementation Techniques (ATT&CK):** [List relevant ATT&CK techniques]
+    **Attack Complexity:** [Based on CWE exploitation complexity and CAPEC complexity assessment]
+    **Likelihood/Severity:** [Based on CWE impact severity and CAPEC likelihood and severity ratings]
 
-    ## Execution Timeline (CAPEC Execution Flow Based)
-    ### Phase 1: Reconnaissance & Resource Development (Duration)
-    - **CAPEC Preparation Steps:**
-    - [Specific reconnaissance activities based on CAPEC prerequisites]
-    - [Tool and payload preparation requirements]
-    - **Expected Outcomes:** [What should be achieved in this phase]
+    ## Vulnerability Exploitation Chain
+    ### Target Weakness Analysis
+    - **Primary CWE Weakness(es):** [Specific weaknesses being targeted]
+    - **Weakness Characteristics:** [Abstraction level, exploitation complexity, impact severity]
+    - **Exploitation Conditions:** [Environmental and technical conditions required]
+    - **Attack Surface:** [Where these weaknesses typically manifest]
 
-    ### Phase 2: Initial Access & Exploitation (Duration)
-    - **CAPEC Attack Execution:**
-    - [Step-by-step implementation of CAPEC pattern]
-    - [Integration with MITRE techniques where applicable]
-    - **Technical Implementation:** [Specific commands, tools, or techniques]
-    - **Expected Outcomes:** [Indicators of successful execution]
+    ### Attack Pattern Implementation
+    - **CAPEC Pattern Selection:** [How CAPEC patterns target the identified CWE weaknesses]
+    - **Pattern Prerequisites:** [Specific conditions needed for pattern success]
+    - **Environmental Suitability:** [Target environments where pattern is most effective]
 
-    ### Phase 3: Post-Exploitation & Impact Demonstration (Duration)
-    - **Follow-on Activities:**
-    - [Actions after successful initial exploitation]
-    - [Demonstration of business impact]
-    - **Evidence Collection:** [What to document for scenario completion]
+    ### Technical Execution Methods
+    - **ATT&CK Technique Integration:** [How ATT&CK techniques implement the CAPEC patterns]
+    - **Tool and Command Selection:** [Specific tools that exploit the target weaknesses]
+    - **Implementation Considerations:** [Technical factors for successful exploitation]
 
-    ### Phase 4: Detection Testing & Cleanup (Duration)
+    ## Execution Timeline (Vulnerability-Driven Approach)
+    ### Phase 1: Vulnerability Discovery & Analysis (Duration)
+    - **Weakness Identification:**
+    - [Methods for discovering target CWE weaknesses in environment]
+    - [Vulnerability assessment and confirmation techniques]
+    - [Analysis of weakness exploitability conditions]
+    - **Expected Outcomes:** [Confirmed presence and exploitability of target weaknesses]
+
+    ### Phase 2: Attack Pattern Preparation (Duration)
+    - **CAPEC Pattern Setup:**
+    - [Preparation steps specific to chosen CAPEC patterns]
+    - [Tool and payload development targeting identified weaknesses]
+    - [Environmental condition validation]
+    - **Expected Outcomes:** [Ready-to-execute attack components targeting confirmed weaknesses]
+
+    ### Phase 3: Weakness Exploitation (Duration)
+    - **CWE Exploitation Execution:**
+    - [Step-by-step weakness exploitation using prepared CAPEC patterns]
+    - [Implementation via specific MITRE ATT&CK techniques]
+    - [Monitoring for successful weakness exploitation indicators]
+    - **Expected Outcomes:** [Successful exploitation of target weaknesses achieving initial objectives]
+
+    ### Phase 4: Impact Demonstration & Assessment (Duration)
+    - **Exploitation Impact:**
+    - [Demonstration of CWE weakness exploitation consequences]
+    - [Validation of CAPEC pattern effectiveness]
+    - [Documentation of attack technique success]
+    - **Expected Outcomes:** [Clear evidence of weakness exploitation and business impact]
+
+    ### Phase 5: Detection Testing & Remediation Validation (Duration)
     - **Detection Validation:**
-    - [Test detection capabilities based on CAPEC mitigation strategies]
-    - [Verify monitoring and alerting effectiveness]
-    - **Cleanup Activities:** [Remove artifacts and restore systems]
+    - [Test detection capabilities for CWE weakness exploitation]
+    - [Verify monitoring for CAPEC pattern execution]
+    - [Validate alerting on MITRE technique implementation]
+    - **Cleanup Activities:** [Remove artifacts and restore systems to secure state]
 
     ## Technical Implementation Details
-    **Attack Vectors:** [Specific methods from CAPEC pattern analysis]
-    **Tools Required:** [Based on CAPEC execution requirements and skill level]
-    **Target Systems:** [Aligned with CAPEC environment suitability]
-    **Payload/Exploit Details:** [Technical specifics appropriate to skill level]
+    **Vulnerability Targeting:** [Specific methods for exploiting identified CWE weaknesses]
+    **Attack Vector Implementation:** [How CAPEC patterns are technically executed]
+    **Tools Required:** [Based on CWE exploitation requirements, CAPEC execution needs, and skill level]
+    **Target Systems:** [Aligned with CWE applicability and CAPEC environment suitability]
+    **Payload/Exploit Details:** [Technical specifics for weakness exploitation appropriate to skill level]
 
-    ## Detection Opportunities (CAPEC Mitigation-Informed)
-    **Preventive Controls:**
-    - [Controls that would prevent this CAPEC pattern]
-    - [Input validation, access controls, etc.]
+    ## Defense Integration (Three-Source Approach)
+    **Preventive Controls (CWE-Focused):**
+    - [Input validation and secure coding practices to prevent CWE weaknesses]
+    - [Architectural controls addressing weakness root causes]
+    - [Configuration and deployment controls reducing weakness exploitability]
 
-    **Detective Controls:**
+    **Detective Controls (CAPEC-Informed):**
     - [Monitoring and alerting for CAPEC pattern indicators]
-    - [Log analysis and behavioral detection]
+    - [Behavioral detection for attack pattern execution]
+    - [Log analysis for pattern-specific artifacts]
 
-    **Response Actions:**
-    - [Incident response procedures for this attack pattern]
-    - [Containment and eradication steps]
+    **Response Controls (MITRE-Aligned):**
+    - [Incident response procedures for detected ATT&CK techniques]
+    - [Containment strategies for specific technique implementations]
+    - [Eradication steps targeting weakness remediation]
 
-    ## Success Metrics & Validation
-    **Primary Objectives:**
-    - [Core goals based on CAPEC pattern completion]
-    - [Technical milestones for attack success]
+    ##Learning Objectives:**
+    - [Understanding of specific weakness exploitation methods]
+    - [Knowledge of attack pattern effectiveness and limitations]
+    - [Skills in technique implementation and detection]
 
-    **Learning Objectives:**
-    - [Skills and knowledge gained from this scenario]
-    - [Understanding of attack pattern effectiveness]
-
-    **Detection Effectiveness:**
-    - [Validation of defensive capabilities]
-    - [Gaps identified in monitoring and response]
 
     ## Resources Required
     **Personnel:** [Team roles and skill requirements]
@@ -367,21 +411,16 @@ Success Metrics: Successful credential harvesting, lateral movement to target sy
     **Time Investment:** [Realistic time allocation per phase]
     **Environment Setup:** [Infrastructure and configuration requirements]
 
-    ## Follow-up Recommendations
-    **Immediate Actions:** [Priority remediation based on CAPEC mitigations]
-    **Long-term Improvements:** [Strategic security enhancements]
-    **Additional Testing:** [Related attack patterns to explore]
-
     ---
 
     **Scenario Characteristics:**
-    - Complexity Level: [Based on CAPEC complexity rating]
-    - Skill Level Required: [Aligned with CAPEC skill requirements]
-    - Environment Applicability: [Based on CAPEC environment suitability]
-    - Real-world Likelihood: [Based on CAPEC likelihood assessment]
+    - Vulnerability Focus: [Primary CWE weakness categories being targeted]
+    - Attack Complexity: [Based on CWE exploitation complexity and CAPEC ratings]
+    - Skill Level Required: [Aligned with weakness exploitation requirements]
+    - Environment Applicability: [Based on CWE applicability and CAPEC environment suitability]
+    - Real-world Likelihood: [Based on CWE prevalence and CAPEC likelihood assessment]
 
-    Ensure the scenario provides a realistic, educational experience that demonstrates both offensive techniques and defensive considerations while maintaining appropriate complexity for the specified skill level.
-    """
+    Ensure the scenario demonstrates a realistic vulnerability exploitation chain that shows how specific weaknesses (CWE) enable attack patterns (CAPEC) implemented through techniques (MITRE ATT&CK), providing comprehensive offensive and defensive learning opportunities.    """
         
         return format_instructions
     
