@@ -276,7 +276,7 @@ class ScenarioEvaluator:
         # Understandability - based on structure and clarity
         structure_indicators = ["#", "##", "objective", "step", "phase"]
         structure_score = sum(1 for indicator in structure_indicators if indicator.lower() in scenario_text.lower())
-        scores["understandability"] = min(5 + structure_score, 9)
+        scores["alignment"] = min(5 + structure_score, 9)
         
         # Calculate overall score
         overall_score = sum(scores.values()) / len(scores)

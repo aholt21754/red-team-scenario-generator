@@ -52,13 +52,13 @@ class Config:
         "technical_accuracy", 
         "realism",
         "creativity",
-        "understandability"
+        "alignment"
     ]
-    EVALUATION_SCALE_MAX: int = 10
+    EVALUATION_SCALE_MAX: int = 5
     EVALUATION_SCALE_MIN: int = 1
     
     # Scenario generation settings
-    MAX_PROMPT_LENGTH: int = int(os.getenv("MAX_PROMPT_LENGTH", "4000"))
+    MAX_PROMPT_LENGTH: int = int(os.getenv("MAX_PROMPT_LENGTH", "6000"))
     INCLUDE_EXAMPLES: bool = os.getenv("INCLUDE_EXAMPLES", "true").lower() == "true"
     
     @classmethod
