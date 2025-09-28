@@ -118,7 +118,12 @@ class ScenarioGenerator:
             if evaluate and self.evaluator:
                 try:
                     evaluation = self.evaluator.evaluate_scenario(raw_response)
-                    scenario.evaluation_scores = evaluation.get('scores', {}) if evaluation else {}
+                    if evaluation:
+                        scenario.evaluation_result = evaluation
+                        scenario.evaluation_scores = evaluation.scores  # For backward compatibility
+                    else:
+                        scenario.evaluation_result = None
+                        scenario.evaluation_scores = {}
                 except Exception as e:
                     logger.warning(f"Scenario evaluation failed: {e}")
                     scenario.evaluation_scores = {}

@@ -264,28 +264,51 @@ def main():
         if st.session_state.get('current_scenario'):
             scenario = st.session_state.current_scenario
             
-            if hasattr(scenario, 'evaluation_scores') and scenario.evaluation_scores:
-                scores = scenario.evaluation_scores
+            if hasattr(scenario, 'evaluation_result') and scenario.evaluation_result:
+                evaluation = scenario.evaluation_result
                 
-                # Create visualization of scores
-                st.subheader("Score Breakdown")
-                for criterion, score in scores.items():
+                # Overall score at the top
+                st.subheader("📊 Overall Score")
+                st.metric("Total Score", f"{evaluation.overall_score}/5")
+
+                # Detailed Scores
+                st.subheader("📈 Detailed Score Breakdown")
+                for criterion, score in evaluation.scores.items():
                     criterion_display = criterion.replace('_', ' ').title()
                     st.write(f"**{criterion_display}**")
-                    st.progress(score / 10)
-                    st.write(f"Score: {score}/10")
-                    st.write("")
+                    st.progress(score / 5)
                 
-                # Recommendations
-                st.subheader("💡 Recommendations")
-                low_scores = [k for k, v in scores.items() if v < 7]
+                # Create tabs for detailed feedback
+                tab1, tab2, tab3 = st.tabs(["✅ Strengths", "💡 Improvements", "📋 Analysis"])
                 
-                if low_scores:
-                    st.warning("Areas for improvement:")
-                    for criterion in low_scores:
-                        st.write(f"• Consider enhancing {criterion.replace('_', ' ')}")
-                else:
-                    st.success("Excellent scenario quality! Consider creating variations for different environments or skill levels.")
+                with tab1:
+                    st.subheader("✅ Scenario Strengths")
+                    if evaluation.strengths:
+                        for i, strength in enumerate(evaluation.strengths, 1):
+                            st.success(f"**{i}.** {strength}")
+                    else:
+                        st.info("No specific strengths identified in this evaluation.")
+                
+                with tab2:
+                    st.subheader("💡 Areas for Improvement")
+                    if evaluation.improvements:
+                        for i, improvement in enumerate(evaluation.improvements, 1):
+                            st.warning(f"**{i}.** {improvement}")
+                    else:
+                        st.success("No major improvements identified - excellent work!")
+                
+                with tab3:
+                    st.subheader("📋 Justification")
+                    if evaluation.justification:
+                        st.markdown("**Evaluator's Detailed Analysis:**")
+                        # Use expander for long justifications
+                        if len(evaluation.justification) > 500:
+                            with st.expander("📖 View Full Analysis (Click to Expand)", expanded=True):
+                                st.write(evaluation.justification)
+                        else:
+                            st.write(evaluation.justification)
+                    else:
+                        st.info("No detailed analysis available for this evaluation.")
             else:
                 st.error("No evaluation data available")
         

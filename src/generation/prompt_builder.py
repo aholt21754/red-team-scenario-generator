@@ -47,7 +47,6 @@ class PromptBuilder:
             logger.error(f"Failed to build scenario prompt: {e}")
             return self._build_fallback_prompt(request)
 
-    #TODO: evaluation criteria is still not finalized.  Will need to update here once finalized.
     def build_evaluation_prompt(self, scenario_text: str) -> str:
         """Build evaluation prompt for scenario assessment.
         
@@ -58,52 +57,62 @@ class PromptBuilder:
             Evaluation prompt string
         """
         evaluation_prompt = f"""
-You are an expert cybersecurity evaluator. Assess the following red team scenario on these criteria using a scale of 1-10:
+You are an expert cybersecurity evaluator. Assess the following red team scenario on these criteria using a scale of 1-5 (1 = Poor, 5 = Excellent):
 
 **Scenario to Evaluate:**
 {scenario_text}
 
-**Evaluation Criteria (1-10 scale):**
+**Evaluation Criteria (1-5 scale):**
 
-1. **Level of Detail (1-10)**
+1. **Level of Detail (1-5)**
    - Does the scenario provide sufficient technical specifics?
    - Are attack vectors clearly defined with step-by-step instructions?
    - Are timelines, tools, and resources specified?
-   - Score 1-3: Vague, missing critical details
-   - Score 4-6: Adequate detail, some gaps
-   - Score 7-10: Comprehensive, actionable detail
+   - Score 1: Lacks detail, vague descriptions and instructions
+   - Score 2-3: Some detail but missing key elements - must include both attack steps and detection points
+   - Score 4: Some gaps which could include missing detailed steps for executing vulnerabilities or detection points
+   - Score 5: Comprehensive, actionable detail
 
-2. **Technical Accuracy (1-10)**
+2. **Technical Accuracy (1-5)**
    - Are the described techniques realistic and feasible?
    - Do the tools and methods align with actual attack patterns?
    - Are vulnerabilities and exploits technically sound?
-   - Score 1-3: Significant technical errors
-   - Score 4-6: Mostly accurate, minor issues
-   - Score 7-10: Highly accurate and realistic
+   - Score 1-2: Significant technical errors
+   - Score 3-4: Mostly accurate, minor issues
+   - Score 5: Highly accurate and realistic
 
-3. **Realism (1-10)**
+3. **Realism (1-5)**
    - Would this scenario likely occur in a real environment?
    - Are the attacker motivations and capabilities believable?
    - Does the scenario reflect current threat landscape?
-   - Score 1-3: Unrealistic or outdated
-   - Score 4-6: Somewhat realistic
-   - Score 7-10: Highly realistic and current
+   - Score 1-2: Unrealistic or outdated
+   - Score 3-4: Somewhat realistic
+   - Score 5: Highly realistic and current
 
-4. **Creativity (1-10)**
+4. **Creativity (1-5)**
    - Does the scenario present novel attack approaches?
    - Are there innovative combinations of techniques?
    - Does it challenge defenders in new ways?
-   - Score 1-3: Generic, predictable approach
-   - Score 4-6: Some creative elements
-   - Score 7-10: Highly innovative and challenging
+   - Score 1-2: Generic, predictable approach
+   - Score 3-4: Some creative elements
+   - Score 5: Highly innovative and challenging
 
-5. **Understandability (1-10)**
-   - Is the scenario clearly written and easy to follow?
-   - Can stakeholders at different technical levels comprehend it?
-   - Are complex concepts explained appropriately?
-   - Score 1-3: Confusing or poorly written
-   - Score 4-6: Understandable with effort
-   - Score 7-10: Clear and accessible
+5. **Match Environment and Skill Level (1-5)**
+   - Did the scenario align well with the specified environment?
+   - Did the scenario match the requested skill level (Beginner, Intermediate, Expert)?
+   - Do the tools and techniques fit the requested skill level?
+   - Do the defensive measures align with the environment and requested skill level?
+   - Score 1: Totally misaligned
+   - Score 2: Some overlap with requested environment/skill level, but mostly misaligned
+   - Score 3: Matches some aspects of environment/skill level, but has notable misalignments or well aligned but only on either environment or skill level
+   - Score 4: Mostly aligned with environment/skill level, minor misalignments
+   - Score 5: Perfectly aligned with environment/skill level
+
+   **Strengths**
+    - Identify 2-3 key strengths of the scenario in terms of detail, accuracy, realism, creativity, or alignment.
+
+   **Improvements**
+    - Provide 2-3 specific suggestions for improving the scenario in terms of detail, accuracy, realism, creativity, or alignment.
 
 **Required Output Format (JSON only):**
 {{
@@ -112,12 +121,12 @@ You are an expert cybersecurity evaluator. Assess the following red team scenari
         "technical_accuracy": X,
         "realism": X,
         "creativity": X,
-        "understandability": X
+        "alignment": X
     }},
     "overall_score": X.X,
     "strengths": ["strength1", "strength2", "strength3"],
     "improvements": ["improvement1", "improvement2"],
-    "justification": "Brief explanation of scoring rationale (2-3 sentences)"
+    "justification": "Brief explanation of scoring rationale (3 - 5 sentences)"
 }}
 
 Provide only the JSON response with no additional text.
@@ -200,7 +209,6 @@ Provide only the JSON response with no additional text.
     
         return techniques[:10]  
 
-    #TODO: prompt hasn't been determined - there's a placeholder here but it's not final   
     def _build_main_prompt(self, request, techniques: List[Dict]) -> str:
         """Enhanced main prompt building with ATT&CK, CAPEC, and CWE integration."""
         prompt = f"""
@@ -383,7 +391,7 @@ Provide only the JSON response with no additional text.
     **Target Systems:** [Aligned with CWE applicability and CAPEC environment suitability]
     **Payload/Exploit Details:** [Technical specifics for weakness exploitation appropriate to skill level]
 
-    ## Defense Integration (Three-Source Approach)
+    ## Defense Integration 
     **Preventive Controls (CWE-Focused):**
     - [Input validation and secure coding practices to prevent CWE weaknesses]
     - [Architectural controls addressing weakness root causes]
@@ -394,7 +402,7 @@ Provide only the JSON response with no additional text.
     - [Behavioral detection for attack pattern execution]
     - [Log analysis for pattern-specific artifacts]
 
-    **Response Controls (MITRE-Aligned):**
+    **Response Controls (ATT&CK-Aligned):**
     - [Incident response procedures for detected ATT&CK techniques]
     - [Containment strategies for specific technique implementations]
     - [Eradication steps targeting weakness remediation]

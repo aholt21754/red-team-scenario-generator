@@ -124,10 +124,10 @@ Demonstrate spear-phishing techniques in a controlled corporate environment to t
         
         if evaluation:
             print("✅ Evaluation completed!")
-            print(f"   Overall Score: {evaluation.overall_score}/10")
+            print(f"   Overall Score: {evaluation.overall_score}/5")
             print(f"   Individual Scores:")
             for criterion, score in evaluation.scores.items():
-                print(f"     {criterion}: {score}/10")
+                print(f"     {criterion}: {score}/5")
             print(f"   Strengths: {evaluation.strengths}")
             print(f"   Improvements: {evaluation.improvements}")
             print(f"   Justification: {evaluation.justification[:100]}...")
