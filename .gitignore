@@ -33,3 +33,15 @@ chroma_db/
 
 # Logs
 logs/
+logs/chatbot_runs/
+
+interactive/logs/
+interactive/logs/chatbot_runs/
+interactive/chroma_db/
+
+*.csv
+src/utils/red_team_logs/
+
+.DS_Store
+/scripts/.DS_Store
+/src/utils/.DS_Store
