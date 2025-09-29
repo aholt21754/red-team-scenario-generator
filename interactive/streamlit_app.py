@@ -10,6 +10,7 @@ import os
 # Add src to path - having real problems with the calc here so hard coding for now
 src_path = Path(__file__).parent.parent / "src"
 sys.path.append("/Users/annholt/red-team-scenario-generator/src")
+sys.path.append("/Users/annholt/red-team-scenario-generator") 
 
 #st.write("**Debug Info:**")
 #st.write(f"Current working directory: {os.getcwd()}")
@@ -29,6 +30,7 @@ from database.vector_db import VectorDB
 from generation.scenario_generator import ScenarioGenerator, ScenarioRequest
 from generation.llm_client import LLMClient
 from evaluation.evaluator import ScenarioEvaluator
+from utils.resultslogger import RedTeamChatbotLogger 
 
 # Page configuration
 st.set_page_config(
@@ -69,12 +71,18 @@ def initialize_components():
             llm_client=llm_client,
             evaluator=evaluator
         )
+
+        results_logger = RedTeamChatbotLogger(
+            individual_logs_dir="logs/chatbot_runs",
+            csv_summary_path="logs/summary.csv"
+        )
         
         return {
             'generator': scenario_generator,
             'vector_db': vector_db,
             'stats': stats,
-            'llm_provider': llm_client.provider
+            'llm_provider': llm_client.provider,
+            'logger': results_logger 
         }
         
     except Exception as e:
@@ -187,7 +195,35 @@ def main():
                     
                     if scenario:
                         st.session_state.current_scenario = scenario
-                        st.success("✅ Scenario generated successfully!")
+
+                        if hasattr(scenario, 'evaluation_result') and scenario.evaluation_result:
+                            # Prepare metadata from UI settings
+                            additional_metadata = {
+                                "difficulty_level": skill_level.lower(),
+                                "environment": environment,
+                                "target_duration": duration,
+                                "team_size": team_size,
+                                "interface": "streamlit_web_ui"
+                            }
+                            
+                            # Convert evaluation result to dict format
+                            evaluation_dict = {
+                                "scores": scenario.evaluation_result.scores,
+                                "overall_score": scenario.evaluation_result.overall_score,
+                                "strengths": scenario.evaluation_result.strengths,
+                                "improvements": scenario.evaluation_result.improvements,
+                                "justification": scenario.evaluation_result.justification
+                            }
+                            
+                            # Log the run
+                            log_filename = components['logger'].log_chatbot_run(
+                                user_input=scenario_query,
+                                chatbot_output=scenario.description,
+                                evaluation_results=evaluation_dict,
+                                additional_metadata=additional_metadata
+                            )
+
+                        st.success(f"✅ Scenario generated successfully! (Logged as: {log_filename})")
                     else:
                         st.error("❌ Failed to generate scenario. Please try rephrasing your request.")
                         
