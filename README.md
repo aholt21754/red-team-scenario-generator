@@ -18,7 +18,7 @@ flowchart TB
         BC["Environment"]
         BD["Skill Level"]
   end
-       U["AnthropicClient<br>claude-3-sonnet-20240229"]
+       U["AnthropicClient<br>claude-4-sonnet-20250514"]
        AB["Generated Scenario"]
        AH["Evaluation Scores:<br>- level_of_detail<br>- technical_accuracy<br>- realism<br>- creativity<br>- alignment"]
        AC["Final Result with Generated Scenario and Evaluation"]
@@ -35,13 +35,6 @@ AH --> U
 U --> AB
 AB --> AH
 U --> AC
-    style AC fill:#99ff99
-    style A1 fill:#99ccff
-    style U fill:#ff9999
-    style BA fill:#ffcc99
-    style A2 fill:#99ccff
-    style A3 fill:#99ccff
-    style AH fill:#ffcc99
 ```
 
 ## Setup
