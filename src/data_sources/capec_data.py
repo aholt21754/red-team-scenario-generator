@@ -93,7 +93,7 @@ class CapecDataLoader(BaseDataLoader):
             return documents
             
         except Exception as e:
-            logger.error(f"CAPEC data loading failed: {e}")
+            logger.exception(f"CAPEC data loading failed: {e}")
             return self._get_fallback_patterns()
     
     def validate_data(self, data: List[Dict]) -> bool:
@@ -202,12 +202,8 @@ class CapecDataLoader(BaseDataLoader):
             patterns = []
             
             # The XML structure is: Attack_Pattern_Catalog -> Attack_Patterns -> Attack_Pattern
-            attack_patterns = root.findall('.//capec:Attack_Pattern', self.namespace)
-            
-            if not attack_patterns:
-                # Try without namespace
-                attack_patterns = root.findall('.//Attack_Pattern')
-            
+            attack_patterns = self._findall(root, 'Attack_Pattern', recursive=True)
+
             logger.info(f"Found {len(attack_patterns)} attack patterns in XML")
             
             for pattern_elem in attack_patterns:
@@ -216,7 +212,7 @@ class CapecDataLoader(BaseDataLoader):
                     if pattern:
                         patterns.append(pattern)
                 except Exception as e:
-                    logger.warning(f"Failed to parse individual pattern: {e}")
+                    logger.warning(f"Failed to parse individual pattern: {e}", exc_info=True)
                     continue
             
             logger.info(f"Successfully parsed {len(patterns)} attack patterns")
@@ -226,7 +222,7 @@ class CapecDataLoader(BaseDataLoader):
             logger.error(f"XML parsing error: {e}")
             return []
         except Exception as e:
-            logger.error(f"Unexpected error parsing XML: {e}")
+            logger.exception(f"Unexpected error parsing XML: {e}")
             return []
     
     def _parse_single_pattern(self, pattern_elem) -> Optional[Dict]:
@@ -248,111 +244,48 @@ class CapecDataLoader(BaseDataLoader):
             if not capec_id or not name:
                 return None
             
-            # Extract description
-            desc_elem = pattern_elem.find('capec:Description', self.namespace)
-            if desc_elem is None:
-                desc_elem = pattern_elem.find('Description')
-            description = desc_elem.text if desc_elem is not None else ''
-            
-            # Extract likelihood and severity
-            likelihood_elem = pattern_elem.find('capec:Likelihood_Of_Attack', self.namespace)
-            if likelihood_elem is None:
-                likelihood_elem = pattern_elem.find('Likelihood_Of_Attack')
-            likelihood = likelihood_elem.text if likelihood_elem is not None else 'Unknown'
-            
-            severity_elem = pattern_elem.find('capec:Typical_Severity', self.namespace)
-            if severity_elem is None:
-                severity_elem = pattern_elem.find('Typical_Severity')
-            severity = severity_elem.text if severity_elem is not None else 'Unknown'
-            
-            # Extract prerequisites
-            prerequisites = []
-            prereq_elems = pattern_elem.findall('.//capec:Prerequisite', self.namespace)
-            if not prereq_elems:
-                prereq_elems = pattern_elem.findall('.//Prerequisite')
-            
-            for prereq in prereq_elems:
-                if prereq.text:
-                    prerequisites.append(prereq.text.strip())
-            
-            # Extract skills required
+            # Direct children only: a recursive search for Description would
+            # also pick up every Attack_Step description.
+            description = self._text(pattern_elem, 'Description')
+            likelihood = self._text(pattern_elem, 'Likelihood_Of_Attack', 'Unknown')
+            severity = self._text(pattern_elem, 'Typical_Severity', 'Unknown')
+
+            prerequisites = [t for t in (self._extract_text_content(p) for p in
+                             self._findall(pattern_elem, 'Prerequisite', recursive=True)) if t]
+
             skills = []
-            skill_elems = pattern_elem.findall('.//capec:Skill', self.namespace)
-            if not skill_elems:
-                skill_elems = pattern_elem.findall('.//Skill')
-            
-            for skill in skill_elems:
+            for skill in self._findall(pattern_elem, 'Skill', recursive=True):
                 level = skill.get('Level', 'Unknown')
-                text = skill.text if skill.text else ''
+                text = self._extract_text_content(skill)
                 if text:
-                    skills.append(f"{level}: {text.strip()}")
-            
-            # Extract execution flow steps
+                    skills.append(f"{level}: {text}")
+
             execution_steps = []
-            step_elems = pattern_elem.findall('.//capec:Attack_Step', self.namespace)
-            if not step_elems:
-                step_elems = pattern_elem.findall('.//Attack_Step')
-            
-            for step in step_elems:
-                step_num = step.find('capec:Step', self.namespace)
-                if step_num is None:
-                    step_num = step.find('Step')
-                
-                phase = step.find('capec:Phase', self.namespace)
-                if phase is None:
-                    phase = step.find('Phase')
-                
-                step_desc = step.find('capec:Description', self.namespace)
-                if step_desc is None:
-                    step_desc = step.find('Description')
-                
-                if step_num is not None and phase is not None and step_desc is not None:
-                    execution_steps.append({
-                        'step': step_num.text,
-                        'phase': phase.text,
-                        'description': step_desc.text
-                    })
-            
-            # Extract mitigations
-            mitigations = []
-            mitigation_elems = pattern_elem.findall('.//capec:Mitigation', self.namespace)
-            if not mitigation_elems:
-                mitigation_elems = pattern_elem.findall('.//Mitigation')
-            
-            for mitigation in mitigation_elems:
-                # Handle both text content and nested HTML
-                mitigation_text = self._extract_text_content(mitigation)
-                if mitigation_text:
-                    mitigations.append(mitigation_text)
-            
-            # Extract related attack patterns
+            for step in self._findall(pattern_elem, 'Attack_Step', recursive=True):
+                execution_steps.append({
+                    'step': self._text(step, 'Step'),
+                    'phase': self._text(step, 'Phase'),
+                    'description': self._text(step, 'Description'),
+                })
+
+            mitigations = [t for t in (self._extract_text_content(m) for m in
+                           self._findall(pattern_elem, 'Mitigation', recursive=True)) if t]
+
             related_patterns = []
-            related_elems = pattern_elem.findall('.//capec:Related_Attack_Pattern', self.namespace)
-            if not related_elems:
-                related_elems = pattern_elem.findall('.//Related_Attack_Pattern')
-            
-            for related in related_elems:
+            for related in self._findall(pattern_elem, 'Related_Attack_Pattern', recursive=True):
                 related_id = related.get('CAPEC_ID', '')
                 nature = related.get('Nature', '')
                 if related_id:
                     related_patterns.append(f"{nature}: CAPEC-{related_id}")
-            
-            # Extract MITRE ATT&CK mappings
+
+            # MITRE ATT&CK mappings
             attack_mappings = []
-            taxonomy_elems = pattern_elem.findall('.//capec:Taxonomy_Mapping', self.namespace)
-            if not taxonomy_elems:
-                taxonomy_elems = pattern_elem.findall('.//Taxonomy_Mapping')
-            
-            for taxonomy in taxonomy_elems:
-                taxonomy_name = taxonomy.get('Taxonomy_Name', '')
-                if taxonomy_name == 'ATTACK':
-                    entry_id = taxonomy.find('capec:Entry_ID', self.namespace)
-                    if entry_id is None:
-                        entry_id = taxonomy.find('Entry_ID')
-                    
-                    if entry_id is not None and entry_id.text:
-                        attack_mappings.append(entry_id.text)
-            
+            for taxonomy in self._findall(pattern_elem, 'Taxonomy_Mapping', recursive=True):
+                if taxonomy.get('Taxonomy_Name', '') == 'ATTACK':
+                    entry_id = self._text(taxonomy, 'Entry_ID')
+                    if entry_id:
+                        attack_mappings.append(entry_id)
+
             return {
                 'capec_id': capec_id,
                 'name': name,
@@ -370,34 +303,72 @@ class CapecDataLoader(BaseDataLoader):
             }
             
         except Exception as e:
-            logger.warning(f"Error parsing pattern {pattern_elem.get('ID', 'unknown')}: {e}")
+            logger.warning(f"Error parsing pattern {pattern_elem.get('ID', 'unknown')}: {e}", exc_info=True)
             return None
-    
-    def _extract_text_content(self, element) -> str:
-        """Extract text content from XML element, handling nested HTML.
-        
+
+    def _find(self, parent, tag: str):
+        """Find a direct child by tag, trying the CAPEC namespace first.
+
+        Uses explicit ``is None`` checks: an Element with no children is
+        falsy, so ``find(a) or find(b)`` would discard text-only matches.
+
         Args:
-            element: XML element
-            
+            parent: XML element to search under
+            tag: Tag name without namespace prefix
+
         Returns:
-            Extracted text content
+            Matching element or None
         """
-        if element.text:
-            text = element.text
-        else:
-            # Handle nested content (like xhtml:p tags)
-            texts = []
-            for child in element.iter():
-                if child.text:
-                    texts.append(child.text.strip())
-                if child.tail:
-                    texts.append(child.tail.strip())
-            text = ' '.join(filter(None, texts))
-        
-        # Clean up whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
-    
+        el = parent.find(f'capec:{tag}', self.namespace)
+        if el is None:
+            el = parent.find(tag)
+        return el
+
+    def _findall(self, parent, tag: str, recursive: bool = False) -> List:
+        """Find all matching elements, trying the CAPEC namespace first.
+
+        Args:
+            parent: XML element to search under
+            tag: Tag name without namespace prefix
+            recursive: Search all descendants instead of direct children only
+
+        Returns:
+            List of matching elements (possibly empty)
+        """
+        prefix = './/' if recursive else ''
+        els = parent.findall(f'{prefix}capec:{tag}', self.namespace)
+        return els or parent.findall(f'{prefix}{tag}')
+
+    def _text(self, parent, tag: str, default: str = '') -> str:
+        """Get the flattened text of a direct child element.
+
+        Args:
+            parent: XML element to search under
+            tag: Tag name without namespace prefix
+            default: Value returned when the child is missing or empty
+
+        Returns:
+            Cleaned text content, or ``default``
+        """
+        return self._extract_text_content(self._find(parent, tag)) or default
+
+    def _extract_text_content(self, element) -> str:
+        """Flatten an element (including nested xhtml:* children) into clean text.
+
+        ``itertext()`` walks the element's own text plus every child's text and
+        tail, so mixed content and whitespace-before-<xhtml:p> are preserved.
+
+        Args:
+            element: XML element, or None
+
+        Returns:
+            Extracted text content ('' for a missing or empty element)
+        """
+        if element is None:
+            return ''
+        text = ' '.join(t for t in element.itertext() if t and t.strip())
+        return re.sub(r'\s+', ' ', text).strip()
+
     def _process_capec_pattern(self, pattern: Dict) -> Dict[str, Any]:
         """Process a parsed CAPEC pattern into a document.
         
@@ -461,7 +432,7 @@ class CapecDataLoader(BaseDataLoader):
             }
             
         except Exception as e:
-            logger.error(f"Failed to process CAPEC pattern {pattern.get('capec_id', 'unknown')}: {e}")
+            logger.exception(f"Failed to process CAPEC pattern {pattern.get('capec_id', 'unknown')}: {e}")
             return None
     
     def _determine_complexity(self, pattern: Dict) -> str:
