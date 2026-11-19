@@ -150,6 +150,10 @@ def test_cwe_integration(vector_db):
         if not cwe_data:
             print("❌ No CWE data loaded")
             return False
+
+        if len(cwe_data) < 100:
+            print(f"❌ Only {len(cwe_data)} CWE items — almost certainly the fallback stubs")
+            return False
         
         print(f"✅ Loaded {len(cwe_data)} CWE weaknesses")
         

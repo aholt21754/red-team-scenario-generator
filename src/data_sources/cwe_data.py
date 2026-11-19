@@ -47,6 +47,18 @@ class CweDataLoader(BaseDataLoader):
         
         logger.info(f"Initialized CWE loader with ZIP support, caching: {cache_enabled}")
     
+    def _code_text(self, elem) -> str:
+        parts = []
+        for node in elem.iter():
+            tag = node.tag.split('}')[-1]
+            if node.text:
+                parts.append(node.text)
+            if tag == 'br':
+                parts.append('\n')
+            if node.tail:
+                parts.append(node.tail)
+        return re.sub(r'[ \t]+', ' ', "".join(parts)).strip()
+
     def _is_cache_valid(self) -> bool:
         """Check if cached data is still valid."""
         if not self.cache_file.exists():
@@ -98,7 +110,9 @@ class CweDataLoader(BaseDataLoader):
             # Parse XML data
             weaknesses = self._parse_cwe_xml(xml_data)
             if not weaknesses:
-                logger.warning("Failed to parse CWE XML, using fallback weaknesses")
+                logger.error("CWE parse produced 0 items (catalog version %s) — "
+                 "falling back to %d stub weaknesses",
+                 getattr(self, 'catalog_version', '?'), 5)
                 return self._get_fallback_weaknesses()
             
             # Process weaknesses into documents
@@ -236,54 +250,56 @@ class CweDataLoader(BaseDataLoader):
             logger.error(f"Failed to extract XML from ZIP: {e}")
             return None
     
-    def _parse_cwe_xml(self, xml_data: str) -> List[Dict]:
-        """Parse CWE XML data into structured weaknesses."""
-        try:
-            logger.info("Parsing CWE XML data...")
-            
-            # Parse XML with namespace handling
-            root = ET.fromstring(xml_data)
-            
-            # Find all weaknesses
-            weaknesses = []
-            
-            # The structure is: Weakness_Catalog -> Weaknesses -> Weakness
-            # All with namespace {http://cwe.mitre.org/cwe-7}
-            weakness_elements = root.findall('.//cwe:Weakness', self.namespace)
-            
-            logger.info(f"Found {len(weakness_elements)} weakness elements in XML")            
+    def _strip_namespaces(self, root: ET.Element) -> ET.Element:
+        """Remove all XML namespaces in-place so plain tag lookups work.
 
-            for weakness_elem in weakness_elements:
-                try:
-                    weakness = self._parse_single_weakness(weakness_elem, self.namespace)
-                    if weakness:
-                        weaknesses.append(weakness)
-                except Exception as e:
-                    logger.warning(f"Failed to parse individual weakness: {e}")
-                    continue
-            
-            # Also look for categories (higher-level groupings)
-            category_elements = root.findall('.//cwe:Category', self.namespace)
-            
-            logger.info(f"Found {len(category_elements)} category elements in XML")
-            
-            for category_elem in category_elements:
-                try:
-                    category = self._parse_single_category(category_elem, self.namespace)
-                    if category:
-                        weaknesses.append(category)
-                except Exception as e:
-                    logger.warning(f"Failed to parse individual category: {e}")
-                    continue
-            
-            logger.info(f"Successfully parsed {len(weaknesses)} total CWE items")
-            return weaknesses
-            
+        Makes the loader immune to cwe-6 / cwe-7 / cwe-8 / future schema bumps.
+        """
+        for el in root.iter():
+            if isinstance(el.tag, str) and '}' in el.tag:
+                el.tag = el.tag.split('}', 1)[1]
+            # drop namespace declarations / xsi:* attributes
+            el.attrib = {
+                (k.split('}', 1)[1] if isinstance(k, str) and '}' in k else k): v
+                for k, v in el.attrib.items()
+                if not str(k).startswith('xmlns')
+            }
+        return root
+
+    
+    def _parse_cwe_xml(self, xml_data: str) -> List[Dict]:
+        try:
+            root = ET.fromstring(xml_data)
+            logger.info(
+                "CWE catalog: tag=%s version=%s date=%s",
+                root.tag, root.get('Version'), root.get('Date')
+            )
+            self.catalog_version = root.get('Version', 'unknown')
+            root = self._strip_namespaces(root)
+
+            weakness_elements = root.findall('.//Weakness')
+            category_elements = root.findall('.//Category')
+            logger.info("Found %d weaknesses, %d categories",
+                        len(weakness_elements), len(category_elements))
+
+            if not weakness_elements:
+                logger.error("No <Weakness> elements — schema/layout change?")
+                return []
+
+            items = []
+            for el in weakness_elements:
+                w = self._parse_single_weakness(el, {})
+                if w:
+                    items.append(w)
+            for el in category_elements:
+                c = self._parse_single_category(el, {})
+                if c:
+                    items.append(c)
+
+            logger.info("Parsed %d total CWE items", len(items))
+            return items
         except ET.ParseError as e:
-            logger.error(f"XML parsing error: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error parsing XML: {e}")
+            logger.error("XML parsing error: %e".replace("%e", "%s"), e)
             return []
     
     def _clean_text(self, text: str) -> str:
@@ -299,17 +315,17 @@ class CweDataLoader(BaseDataLoader):
         
         return text
     
-    def _extract_element_text(self, parent_elem, element_name: str, namespace: Dict) -> str:
+    def _extract_element_text(self, parent_elem, element_name: str, namespace: Dict = None) -> str:
         """Extract text from a child element, handling namespaces."""
     
-        elem = parent_elem.find(f"cwe:{element_name}", namespace)
+        elem = parent_elem.find(element_name)
         if elem is None:
-            # Try without namespace as fallback
-            elem = parent_elem.find(element_name)        
+            return ""
+        return self._clean_text("".join(elem.itertext()))
 
-        if elem is not None and elem.text:
-            return self._clean_text(elem.text)
-        return ""
+    def _extract_all_texts(self, parent_elem, element_name: str) -> List[str]:
+        return [t for t in (self._clean_text("".join(e.itertext()))
+                            for e in parent_elem.findall(element_name)) if t]    
     
     def _parse_single_weakness(self, weakness_elem, namespace: Dict) -> Optional[Dict]:
         """Parse a single weakness element."""
@@ -325,7 +341,7 @@ class CweDataLoader(BaseDataLoader):
                 return None
             
             # Skip deprecated weaknesses unless configured to include them
-            if status == 'Deprecated' and not config.INCLUDE_DEPRECATED:
+            if status == 'Deprecated' and not getattr(config, 'INCLUDE_DEPRECATED', False):
                 return None
             
             # Extract description
@@ -432,51 +448,33 @@ class CweDataLoader(BaseDataLoader):
             logger.warning(f"Error parsing category {category_elem.get('ID', 'unknown')}: {e}")
             return None
     
-    def _extract_consequences(self, weakness_elem, namespace: Dict) -> List[Dict[str, str]]:
-        """Extract consequence information (CIA impact)."""
-        consequences = []
-        
-        # Look for Common_Consequences with namespace
-        consequences_elem = weakness_elem.find('cwe:Common_Consequences', namespace)
-        if consequences_elem is None:
-            consequences_elem = weakness_elem.find('Common_Consequences')
-        
-        if consequences_elem is not None:
-            consequence_elems = consequences_elem.findall('cwe:Consequence', namespace)
-            if not consequence_elems:
-                consequence_elems = consequences_elem.findall('Consequence')
-                
-            for consequence in consequence_elems:
-                scope = self._extract_element_text(consequence, 'Scope', namespace)
-                impact = self._extract_element_text(consequence, 'Impact', namespace)
-                note = self._extract_element_text(consequence, 'Note', namespace)
-                
-                if scope or impact:
-                    consequences.append({
-                        'scope': scope,
-                        'impact': impact,
-                        'note': note
-                    })
-        
-        return consequences
+    def _extract_consequences(self, elem, namespace: Dict = None) -> List[Dict]:
+        container = elem.find('Common_Consequences')
+        if container is None:
+            return []
+        result = []
+        for c in container.findall('Consequence'):
+            scopes = self._extract_all_texts(c, 'Scope')
+            impacts = self._extract_all_texts(c, 'Impact')
+            note = self._extract_element_text(c, 'Note')
+            if scopes or impacts:
+                result.append({
+                    'scope': ', '.join(scopes),
+                    'impact': ', '.join(impacts),
+                    'note': note,
+                })
+        return result
     
-    def _extract_platforms(self, weakness_elem, namespace: Dict) -> List[str]:
-        """Extract applicable platforms."""
-        platforms = []
-        
-        # Look for Applicable_Platforms
-        platforms_elem = weakness_elem.find('.//Applicable_Platforms', namespace)
-        
-        if platforms_elem is not None:
-            # Extract different platform types
-            for platform_type in ['Language', 'Technology', 'Operating_System', 'Architecture']:
-                platform_elems = platforms_elem.findall(f'.//{platform_type}', namespace)
-                for platform in platform_elems:
-                    name = platform.get('Name', '')
-                    if name:
-                        platforms.append(name)
-        
-        return list(set(platforms))  # Remove duplicates
+    def _extract_platforms(self, elem, namespace: Dict = None) -> List[str]:
+        out = []
+        container = elem.find('Applicable_Platforms')
+        if container is not None:
+            for kind in ('Language', 'Technology', 'Operating_System', 'Architecture'):
+                for p in container.findall(kind):
+                    val = p.get('Name') or p.get('Class')
+                    if val and not val.startswith('Not '):
+                        out.append(val)
+        return sorted(set(out))
     
     def _extract_mitigations(self, weakness_elem, namespace: Dict) -> List[Dict[str, str]]:
         """Extract mitigation strategies."""
@@ -529,14 +527,14 @@ class CweDataLoader(BaseDataLoader):
         capec_mappings = []
         
         # Look for Related_Attack_Patterns with namespace
-        patterns_elem = weakness_elem.find('cwe:Related_Attack_Patterns', namespace)
+        patterns_elem = weakness_elem.find('Related_Attack_Patterns', namespace)
         if patterns_elem is None:
             # Fallback without namespace
             patterns_elem = weakness_elem.find('Related_Attack_Patterns')
         
         if patterns_elem is not None:
             # Find all Related_Attack_Pattern elements
-            attack_patterns = patterns_elem.findall('cwe:Related_Attack_Pattern', namespace)
+            attack_patterns = patterns_elem.findall('Related_Attack_Pattern', namespace)
             if not attack_patterns:
                 # Fallback without namespace
                 attack_patterns = patterns_elem.findall('Related_Attack_Pattern')
